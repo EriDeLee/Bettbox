@@ -1,0 +1,29 @@
+display_name: Bettbox
+package_name: Bettbox
+maintainer:
+  name: appshub
+  email: appshubcc@gmail.com
+
+priority: optional
+section: x11
+installed_size: 6604
+essential: false
+icon: ./assets/images/icon.png
+
+dependencies:
+  - libayatana-appindicator3-dev
+  - libkeybinder-3.0-dev
+
+keywords:
+  - Bettbox
+  - Clash
+  - ClashMeta
+  - Mihomo
+  - Proxy
+
+generic_name: Bettbox
+
+categories:
+  - Network
+
+startup_notify: true

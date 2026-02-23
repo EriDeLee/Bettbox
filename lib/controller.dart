@@ -1,0 +1,1891 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
+
+import 'package:archive/archive_io.dart';
+import 'package:bett_box/clash/clash.dart';
+import 'package:bett_box/enum/enum.dart';
+import 'package:bett_box/plugins/app.dart';
+import 'package:bett_box/providers/providers.dart';
+import 'package:bett_box/state.dart';
+import 'package:bett_box/widgets/dialog.dart';
+import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:yaml/yaml.dart';
+
+import 'common/common.dart';
+import 'common/flclash_database_extractor.dart';
+import 'models/models.dart';
+import 'views/profiles/override_profile.dart';
+
+import 'package:package_info_plus/package_info_plus.dart';
+
+class AppController {
+  int? lastProfileModified;
+
+  final BuildContext context;
+  final WidgetRef _ref;
+
+  Timer? _wakelockSyncTimer;
+
+  AppController(this.context, WidgetRef ref) : _ref = ref;
+
+  void setupClashConfigDebounce() {
+    debouncer.call(FunctionTag.setupClashConfig, () async {
+      await setupClashConfig();
+    });
+  }
+
+  Future<void> updateClashConfigDebounce() async {
+    debouncer.call(FunctionTag.updateClashConfig, () async {
+      await updateClashConfig();
+    });
+  }
+
+  void updateGroupsDebounce() {
+    debouncer.call(FunctionTag.updateGroups, updateGroups);
+  }
+
+  void addCheckIpNumDebounce() {
+    debouncer.call(FunctionTag.addCheckIpNum, () {
+      _ref.read(checkIpNumProvider.notifier).add();
+    });
+  }
+
+  void applyProfileDebounce({bool silence = false}) {
+    debouncer.call(FunctionTag.applyProfile, (silence) {
+      applyProfile(silence: silence);
+    }, args: [silence]);
+  }
+
+  void savePreferencesDebounce() {
+    debouncer.call(FunctionTag.savePreferences, savePreferences);
+  }
+
+  void changeProxyDebounce(String groupName, String proxyName) {
+    debouncer.call(FunctionTag.changeProxy, (
+      String groupName,
+      String proxyName,
+    ) async {
+      await changeProxy(groupName: groupName, proxyName: proxyName);
+      await updateGroups();
+    }, args: [groupName, proxyName]);
+  }
+
+  Future<void> restartCore() async {
+    commonPrint.log('restart core');
+    await clashService?.reStart();
+    await _initCore();
+    if (_ref.read(runTimeProvider.notifier).isStart) {
+      await globalState.handleStart();
+    }
+  }
+
+  Future<void> updateStatus(bool isStart) async {
+    if (isStart) {
+      // Fast start path: immediately start core
+      await _fastStart();
+
+      // Background async load other data
+      // Note: for desktop TUN mode, _fastStart internally delays _backgroundLoad
+      // to avoid race conditions with TUN config updates
+    } else {
+      await globalState.handleStop();
+      clashCore.resetTraffic();
+      _ref.read(trafficsProvider.notifier).clear();
+      _ref.read(totalTrafficProvider.notifier).value = Traffic();
+      _ref.read(runTimeProvider.notifier).value = null;
+      addCheckIpNumDebounce();
+    }
+  }
+
+  /// Fast start: only execute essential startup operations
+  Future<void> _fastStart() async {
+    final patchConfig = _ref.read(patchClashConfigProvider);
+    final isDesktop = system.isDesktop;
+
+    // Desktop optimization: if TUN enabled, start core with TUN disabled first, then enable
+    // Avoids TUN init blocking causing slow button response
+    if (isDesktop && patchConfig.tun.enable) {
+      // 1. Force apply config (disable TUN)
+      await _quickSetupConfig(enableTun: false);
+
+      // 2. Start service (update UI state)
+      await globalState.handleStart([updateRunTime, updateTraffic]);
+
+      // 3. Delay enabling TUN, load background data after TUN enabled
+      // Avoid race conditions with config updates causing proxy page flicker
+      Future.microtask(() async {
+        final res = await _requestAdmin(true);
+        if (!res.isError) {
+          await _updateClashConfig();
+        }
+        // Load background data after TUN config complete
+        _backgroundLoad();
+      });
+
+      // Delay IP detection, ensure proxy ready (after 2s)
+      Future.delayed(const Duration(seconds: 2), () {
+        addCheckIpNumDebounce();
+      });
+      return;
+    }
+
+    await globalState.handleStart([updateRunTime, updateTraffic]);
+
+    // Check if need to reapply config
+    final needReapply = await _checkIfNeedReapply();
+    if (needReapply) {
+      // Only set config, don't update groups and providers (done in background)
+      await _quickSetupConfig();
+    }
+
+    // Delay IP detection, ensure proxy ready (after 2s)
+    Future.delayed(const Duration(seconds: 2), () {
+      addCheckIpNumDebounce();
+    });
+
+    // Non-TUN mode or mobile, load background data immediately
+    _backgroundLoad();
+  }
+
+  /// Background load: async execute non-critical operations
+  void _backgroundLoad() {
+    Future.microtask(() async {
+      try {
+        // Parallel network requests
+        await Future.wait([updateGroups(), updateProviders()]);
+
+        // Delay GC to avoid startup impact
+        await Future.delayed(const Duration(seconds: 2));
+        await clashCore.requestGc();
+      } catch (e) {
+        // Silent error handling
+        commonPrint.log('Background load error: $e');
+      }
+    });
+  }
+
+  Future<bool> _checkIfNeedReapply() async {
+    final currentLastModified = await _ref
+        .read(currentProfileProvider)
+        ?.profileLastModified;
+
+    // Skip reapply if config unchanged
+    if (currentLastModified != null &&
+        lastProfileModified != null &&
+        currentLastModified <= lastProfileModified!) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /// Quick config setup: only set config, no heavy operations
+  Future<void> _quickSetupConfig({bool? enableTun}) async {
+    await safeRun(
+      () async {
+        await _ref.read(currentProfileProvider)?.checkAndUpdate();
+        final patchConfig = _ref.read(patchClashConfigProvider);
+
+        final targetTun = enableTun ?? patchConfig.tun.enable;
+
+        final res = await _requestAdmin(targetTun);
+        if (res.isError) {
+          return;
+        }
+        final realTunEnable = _ref.read(realTunEnableProvider);
+        final realPatchConfig = patchConfig.copyWith.tun(enable: realTunEnable);
+        final params = await globalState.getSetupParams(
+          pathConfig: realPatchConfig,
+        );
+        final message = await clashCore.setupConfig(params);
+        lastProfileModified = await _ref.read(
+          currentProfileProvider.select((state) => state?.profileLastModified),
+        );
+        if (message.isNotEmpty) {
+          throw message;
+        }
+      },
+      needLoading: false, // No loading UI, keep fast startup
+    );
+  }
+
+  Future<void> updateRunTime() async {
+    final startTime = globalState.startTime;
+    if (startTime == null) {
+      if (_ref.read(runTimeProvider) != null) {
+        _ref.read(runTimeProvider.notifier).value = null;
+      }
+      return;
+    }
+
+    final startTimeStamp = startTime.millisecondsSinceEpoch;
+    final nowTimeStamp = DateTime.now().millisecondsSinceEpoch;
+    final elapsed = nowTimeStamp - startTimeStamp;
+
+    final current = _ref.read(runTimeProvider);
+    if (current == null) {
+      _ref.read(runTimeProvider.notifier).value = elapsed;
+      return;
+    }
+
+    if (!await _shouldUpdateTraffic()) {
+      return;
+    }
+
+    _ref.read(runTimeProvider.notifier).value = elapsed;
+  }
+
+  Future<bool> _shouldUpdateTraffic() async {
+    if (!_ref.read(isCurrentPageProvider(PageLabel.dashboard))) {
+      return false;
+    }
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    if (lifecycleState != null && lifecycleState != AppLifecycleState.resumed) {
+      return false;
+    }
+    if (system.isDesktop) {
+      final visible = await window?.isVisible;
+      if (visible == false) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> updateTraffic() async {
+    if (!await _shouldUpdateTraffic()) {
+      return;
+    }
+    final traffic = await clashCore.getTraffic();
+    _ref.read(trafficsProvider.notifier).addTraffic(traffic);
+    _ref.read(totalTrafficProvider.notifier).value = await clashCore
+        .getTotalTraffic();
+  }
+
+  Future<void> addProfile(Profile profile) async {
+    _ref.read(profilesProvider.notifier).setProfile(profile);
+    if (_ref.read(currentProfileIdProvider) != null) return;
+    _ref.read(currentProfileIdProvider.notifier).value = profile.id;
+  }
+
+  Future<void> deleteProfile(String id) async {
+    _ref.read(profilesProvider.notifier).deleteProfileById(id);
+    clearEffect(id);
+    if (globalState.config.currentProfileId == id) {
+      final profiles = globalState.config.profiles;
+      final currentProfileId = _ref.read(currentProfileIdProvider.notifier);
+      if (profiles.isNotEmpty) {
+        final updateId = profiles.first.id;
+        currentProfileId.value = updateId;
+      } else {
+        currentProfileId.value = null;
+        updateStatus(false);
+      }
+    }
+  }
+
+  Future<void> updateProviders() async {
+    _ref.read(providersProvider.notifier).value = await clashCore
+        .getExternalProviders();
+  }
+
+  Future<void> updateLocalIp() async {
+    _ref.read(localIpProvider.notifier).value = null;
+    await Future.delayed(commonDuration);
+    _ref.read(localIpProvider.notifier).value = await utils.getLocalIpAddress();
+  }
+
+  Future<void> updateProfile(Profile profile) async {
+    final newProfile = await profile.update();
+    _ref
+        .read(profilesProvider.notifier)
+        .setProfile(newProfile.copyWith(isUpdating: false));
+    if (profile.id == _ref.read(currentProfileIdProvider)) {
+      applyProfileDebounce(silence: true);
+    }
+  }
+
+  void setProfile(Profile profile) {
+    _ref.read(profilesProvider.notifier).setProfile(profile);
+  }
+
+  void setProfileAndAutoApply(Profile profile) {
+    _ref.read(profilesProvider.notifier).setProfile(profile);
+    if (profile.id == _ref.read(currentProfileIdProvider)) {
+      applyProfileDebounce(silence: true);
+    }
+  }
+
+  void setProfiles(List<Profile> profiles) {
+    _ref.read(profilesProvider.notifier).value = profiles;
+  }
+
+  void addLog(Log log) {
+    _ref.read(logsProvider).add(log);
+  }
+
+  void updateOrAddHotKeyAction(HotKeyAction hotKeyAction) {
+    final hotKeyActions = _ref.read(hotKeyActionsProvider);
+    final index = hotKeyActions.indexWhere(
+      (item) => item.action == hotKeyAction.action,
+    );
+    if (index == -1) {
+      _ref.read(hotKeyActionsProvider.notifier).value = List.from(hotKeyActions)
+        ..add(hotKeyAction);
+    } else {
+      _ref.read(hotKeyActionsProvider.notifier).value = List.from(hotKeyActions)
+        ..[index] = hotKeyAction;
+    }
+
+    _ref.read(hotKeyActionsProvider.notifier).value = index == -1
+        ? (List.from(hotKeyActions)..add(hotKeyAction))
+        : (List.from(hotKeyActions)..[index] = hotKeyAction);
+  }
+
+  List<Group> getCurrentGroups() {
+    return _ref.read(currentGroupsStateProvider.select((state) => state.value));
+  }
+
+  String getRealTestUrl(String? url) {
+    return _ref.read(getRealTestUrlProvider(url));
+  }
+
+  int getProxiesColumns() {
+    return _ref.read(getProxiesColumnsProvider);
+  }
+
+  dynamic addSortNum() {
+    return _ref.read(sortNumProvider.notifier).add();
+  }
+
+  String? getCurrentGroupName() {
+    final currentGroupName = _ref.read(
+      currentProfileProvider.select((state) => state?.currentGroupName),
+    );
+    return currentGroupName;
+  }
+
+  ProxyCardState getProxyCardState(String proxyName) {
+    return _ref.read(getProxyCardStateProvider(proxyName));
+  }
+
+  String? getSelectedProxyName(String groupName) {
+    return _ref.read(getSelectedProxyNameProvider(groupName));
+  }
+
+  void updateCurrentGroupName(String groupName) {
+    final profile = _ref.read(currentProfileProvider);
+    if (profile == null || profile.currentGroupName == groupName) {
+      return;
+    }
+    setProfile(profile.copyWith(currentGroupName: groupName));
+  }
+
+  Future<void> updateClashConfig() async {
+    await safeRun(() async {
+      await _updateClashConfig();
+    }, needLoading: true);
+  }
+
+  Future<void> _updateClashConfig() async {
+    final updateParams = _ref.read(updateParamsProvider);
+    final res = await _requestAdmin(updateParams.tun.enable);
+    if (res.isError) {
+      return;
+    }
+    final realTunEnable = _ref.read(realTunEnableProvider);
+    final message = await clashCore.updateConfig(
+      updateParams.copyWith.tun(enable: realTunEnable),
+    );
+    if (message.isNotEmpty) throw message;
+  }
+
+  Future<Result<bool>> _requestAdmin(bool enableTun) async {
+    if (system.isWindows && kDebugMode) {
+      return Result.success(false);
+    }
+    final realTunEnable = _ref.read(realTunEnableProvider);
+    // When user switches from off to on, check/install privilege service
+    if (enableTun != realTunEnable && realTunEnable == false) {
+      final code = await system.authorizeCore();
+      switch (code) {
+        case AuthorizeCode.success:
+          await restartCore();
+          return Result.error('');
+        case AuthorizeCode.none:
+          break;
+        case AuthorizeCode.error:
+          // Windows: prompt user to run with admin privileges
+          if (system.isWindows) {
+            globalState.showNotifier(appLocalizations.tunEnableRequireAdmin);
+          }
+          enableTun = false;
+          break;
+      }
+    }
+    _ref.read(realTunEnableProvider.notifier).value = enableTun;
+    return Result.success(enableTun);
+  }
+
+  Future<void> setupClashConfig() async {
+    await safeRun(() async {
+      await _setupClashConfig();
+    }, needLoading: true);
+  }
+
+  Future<void> _setupClashConfig() async {
+    await _ref.read(currentProfileProvider)?.checkAndUpdate();
+    final patchConfig = _ref.read(patchClashConfigProvider);
+    final res = await _requestAdmin(patchConfig.tun.enable);
+    if (res.isError) {
+      return;
+    }
+    final realTunEnable = _ref.read(realTunEnableProvider);
+    final realPatchConfig = patchConfig.copyWith.tun(enable: realTunEnable);
+    final params = await globalState.getSetupParams(
+      pathConfig: realPatchConfig,
+    );
+    final message = await clashCore.setupConfig(params);
+    lastProfileModified = await _ref.read(
+      currentProfileProvider.select((state) => state?.profileLastModified),
+    );
+    if (message.isNotEmpty) {
+      throw message;
+    }
+  }
+
+  Future _applyProfile() async {
+    await clashCore.requestGc();
+    await setupClashConfig();
+    await updateGroups();
+    await updateProviders();
+  }
+
+  Future applyProfile({bool silence = false}) async {
+    if (silence) {
+      await _applyProfile();
+    } else {
+      await safeRun(() async {
+        await _applyProfile();
+      }, needLoading: true);
+    }
+    addCheckIpNumDebounce();
+  }
+
+  void handleChangeProfile() {
+    _ref.read(delayDataSourceProvider.notifier).value = {};
+    applyProfile();
+    _ref.read(logsProvider.notifier).value = FixedList(500);
+    _ref.read(requestsProvider.notifier).value = FixedList(500);
+    globalState.computeHeightMapCache = {};
+  }
+
+  void updateBrightness() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ref.read(systemBrightnessProvider.notifier).value =
+          WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    });
+  }
+
+  Future<void> autoUpdateProfiles() async {
+    for (final profile in _ref.read(profilesProvider)) {
+      if (!profile.autoUpdate) continue;
+      final isNotNeedUpdate = profile.lastUpdateDate
+          ?.add(profile.autoUpdateDuration)
+          .isBeforeNow;
+      if (isNotNeedUpdate == false || profile.type == ProfileType.file) {
+        continue;
+      }
+      try {
+        await updateProfile(profile);
+      } catch (e) {
+        commonPrint.log(e.toString());
+      }
+    }
+  }
+
+  Future<void> updateGroups() async {
+    try {
+      final newGroups = await retry(
+        task: () async {
+          return await clashCore.getProxiesGroups();
+        },
+        retryIf: (res) => res.isEmpty,
+        maxAttempts: 5, // Increase retries, give core more init time
+      );
+      // Update when data received
+      _ref.read(groupsProvider.notifier).value = newGroups;
+    } catch (e) {
+      final currentGroups = _ref.read(groupsProvider);
+      if (currentGroups.isEmpty) {
+        // First install: retry after delay if initial load fails
+        commonPrint.log(
+          'updateGroups initial load failed, scheduling retry: $e',
+        );
+        Future.delayed(const Duration(seconds: 2), () {
+          updateGroupsDebounce();
+        });
+      } else {
+        // Has data: keep existing, avoid sidebar flicker
+        commonPrint.log('updateGroups error, keeping existing groups: $e');
+      }
+    }
+  }
+
+  Future<void> updateProfiles() async {
+    for (final profile in _ref.read(profilesProvider)) {
+      if (profile.type == ProfileType.file) {
+        continue;
+      }
+      await updateProfile(profile);
+    }
+  }
+
+  Future<void> savePreferences() async {
+    await preferences.saveConfig(globalState.config);
+  }
+
+  Future<void> changeProxy({
+    required String groupName,
+    required String proxyName,
+  }) async {
+    await clashCore.changeProxy(
+      ChangeProxyParams(groupName: groupName, proxyName: proxyName),
+    );
+    if (_ref.read(appSettingProvider).closeConnections) {
+      clashCore.closeConnections();
+    }
+    addCheckIpNumDebounce();
+  }
+
+  Future<void> handleBackOrExit() async {
+    if (_ref.read(backBlockProvider)) {
+      return;
+    }
+    if (system.isDesktop) {
+      await savePreferences();
+    }
+    await system.back();
+  }
+
+  void backBlock() {
+    _ref.read(backBlockProvider.notifier).value = true;
+  }
+
+  void unBackBlock() {
+    _ref.read(backBlockProvider.notifier).value = false;
+  }
+
+  Future<void> handleExit() async {
+    Future.delayed(commonDuration, () {
+      system.exit();
+    });
+    try {
+      // Clean up WakeLock timer
+      stopWakelockAutoRecovery();
+
+      await savePreferences();
+      await macOS?.updateDns(true);
+      await proxy?.stopProxy();
+      await clashCore.shutdown();
+      await clashService?.destroy();
+    } finally {
+      system.exit();
+    }
+  }
+
+  Future handleClear() async {
+    await preferences.clearPreferences();
+    commonPrint.log('clear preferences');
+    globalState.config = Config(themeProps: defaultThemeProps);
+  }
+
+  Future<void> autoCheckUpdate() async {
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    final lastCheckTime = prefs?.getInt('last_check_update_time') ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final isAutoCheck = _ref.read(appSettingProvider).autoCheckUpdate;
+
+    final forceCheck =
+        (now - lastCheckTime) > const Duration(days: 28).inMilliseconds;
+
+    if (!isAutoCheck && !forceCheck) return;
+
+    final res = await request.checkForUpdate();
+    if (res != null) {
+      checkUpdateResultHandle(data: res);
+    }
+
+    await prefs?.setInt('last_check_update_time', now);
+  }
+
+  Future<void> checkUpdateResultHandle({
+    Map<String, dynamic>? data,
+    bool handleError = false,
+  }) async {
+    if (globalState.isPre) {
+      return;
+    }
+    if (data != null) {
+      final tagName = data['tag_name'];
+      final body = data['body'];
+      final submits = utils.parseReleaseBody(body);
+      final textTheme = context.textTheme;
+      final res = await globalState.showMessage(
+        title: appLocalizations.discoverNewVersion,
+        message: TextSpan(
+          text: '$tagName \n',
+          style: textTheme.headlineSmall,
+          children: [
+            TextSpan(text: '\n', style: textTheme.bodyMedium),
+            for (final submit in submits)
+              TextSpan(text: '- $submit \n', style: textTheme.bodyMedium),
+          ],
+        ),
+        confirmText: appLocalizations.goDownload,
+      );
+      if (res != true) {
+        return;
+      }
+      launchUrl(Uri.parse('https://github.com/$repository/releases/latest'));
+    } else if (handleError) {
+      globalState.showMessage(
+        title: appLocalizations.checkUpdate,
+        message: TextSpan(text: appLocalizations.checkUpdateError),
+      );
+    }
+  }
+
+  Future<void> _handlePreference() async {
+    if (await preferences.isInit) {
+      return;
+    }
+    final res = await globalState.showMessage(
+      title: appLocalizations.tip,
+      message: TextSpan(text: appLocalizations.cacheCorrupt),
+    );
+    if (res == true) {
+      final file = File(await appPath.sharedPreferencesPath);
+      final isExists = await file.exists();
+      if (isExists) {
+        await file.delete();
+      }
+    }
+    await handleExit();
+  }
+
+  Future<void> _initCore() async {
+    final isInit = await clashCore.isInit;
+    if (!isInit) {
+      await clashCore.init();
+      await clashCore.setState(globalState.getCoreState());
+    }
+    await applyProfile();
+  }
+
+  void startWakelockAutoRecovery() {
+    _wakelockSyncTimer?.cancel();
+    _wakelockSyncTimer = Timer.periodic(const Duration(seconds: 180), (
+      _,
+    ) async {
+      try {
+        final userEnabled = _ref.read(wakelockStateProvider);
+
+        if (!userEnabled) {
+          return;
+        }
+
+        final actualState = await WakelockPlus.enabled;
+
+        if (!actualState) {
+          commonPrint.log(
+            'WakeLock was released by system, attempting auto-recovery',
+          );
+
+          await WakelockPlus.enable();
+
+          final recovered = await WakelockPlus.enabled;
+          if (recovered) {
+            commonPrint.log('WakeLock auto-recovery successful');
+          } else {
+            commonPrint.log('WakeLock auto-recovery failed');
+          }
+        }
+      } catch (e) {
+        commonPrint.log('WakeLock sync error: $e');
+      }
+    });
+  }
+
+  void stopWakelockAutoRecovery() {
+    _wakelockSyncTimer?.cancel();
+    _wakelockSyncTimer = null;
+  }
+
+  Future<void> init() async {
+    FlutterError.onError = (details) {
+      if (kDebugMode) {
+        commonPrint.log(details.stack.toString());
+      }
+    };
+
+    try {
+      final wakelockEnabled = await WakelockPlus.enabled;
+      _ref.read(wakelockStateProvider.notifier).state = wakelockEnabled;
+
+      if (wakelockEnabled) {
+        startWakelockAutoRecovery();
+      }
+    } catch (e) {
+      commonPrint.log('Failed to check wake lock status: $e');
+    }
+
+    updateTray(true);
+
+    await _initCore();
+    await _initStatus();
+    autoLaunch?.updateStatus(_ref.read(appSettingProvider).autoLaunch);
+    autoUpdateProfiles();
+    autoCheckUpdate();
+
+    final isWindowVisible = await window?.isVisible ?? false;
+    if (isWindowVisible) {
+      window?.show();
+    } else {
+      if (!_ref.read(appSettingProvider).silentLaunch) {
+        window?.show();
+      } else {
+        window?.hide();
+      }
+    }
+
+    await _handlePreference();
+    await _handlerDisclaimer();
+    _ref.read(initProvider.notifier).value = true;
+  }
+
+  Future<void> _initStatus() async {
+    if (system.isAndroid) {
+      await globalState.updateStartTime();
+    }
+
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+    final lastRunVersion = prefs?.getString('last_run_version');
+
+    bool needRecovery = false;
+    String recoveryReason = '';
+
+    if (system.isAndroid) {
+      final apkLastUpdateTime = await app.getSelfLastUpdateTime();
+      final savedApkUpdateTime = prefs?.getInt('apk_last_update_time') ?? 0;
+
+      bool isReinstall = false;
+      if (savedApkUpdateTime != 0 && savedApkUpdateTime != apkLastUpdateTime) {
+        commonPrint.log(
+          'Reinstall detected by time: $savedApkUpdateTime -> $apkLastUpdateTime',
+        );
+        isReinstall = true;
+        recoveryReason = 'APK reinstall/upgrade';
+      }
+
+      if (lastRunVersion != null && lastRunVersion != currentVersion) {
+        commonPrint.log(
+          'Reinstall detected by version: $lastRunVersion -> $currentVersion',
+        );
+        isReinstall = true;
+        recoveryReason = 'Version change';
+      }
+
+      final isVpnRunningFlag = prefs?.getBool('is_vpn_running') ?? false;
+      final isAbnormalExit = !globalState.isStart && isVpnRunningFlag;
+      if (isAbnormalExit) {
+        commonPrint.log(
+          'Abnormal exit detected (was running but core is dead)',
+        );
+        recoveryReason = 'Abnormal exit';
+      }
+      if (savedApkUpdateTime != apkLastUpdateTime) {
+        await prefs?.setInt('apk_last_update_time', apkLastUpdateTime);
+      }
+      if (lastRunVersion != currentVersion) {
+        await prefs?.setString('last_run_version', currentVersion);
+      }
+
+      needRecovery = isReinstall || isAbnormalExit;
+    }
+
+    if (system.isDesktop) {
+      // Version detection: if previously run and version changed (upgrade/downgrade)
+      if (lastRunVersion != null && lastRunVersion != currentVersion) {
+        commonPrint.log(
+          'Desktop version change detected: $lastRunVersion -> $currentVersion',
+        );
+        needRecovery = true;
+        recoveryReason = 'Version update';
+      }
+
+      // 2. Detect TUN resource conflict: if TUN was running but Core died
+      // TUN device resources may not be properly released
+      final wasTunRunning = prefs?.getBool('is_tun_running') ?? false;
+      final isTunConflict = !globalState.isStart && wasTunRunning;
+      if (isTunConflict) {
+        commonPrint.log(
+          'Desktop TUN resource conflict detected (was running but core is dead)',
+        );
+        needRecovery = true;
+        recoveryReason = 'TUN resource conflict';
+      }
+
+      // Update version record
+      if (lastRunVersion != currentVersion) {
+        await prefs?.setString('last_run_version', currentVersion);
+      }
+    }
+
+    // Unified recovery logic (applies to Android and Desktop)
+    if (needRecovery) {
+      final settingsAutoRun = _ref.read(appSettingProvider).autoRun;
+      final autoRun = settingsAutoRun;
+
+      commonPrint.log('Handling Recovery ($recoveryReason)...');
+
+      // Key logic:
+      // 1. Even if autoRun is true, don't start immediately.
+      // 2. Use await to ensure UI stays locked until recovery completes (initProvider won't become true), prevent accidental touches.
+      // 3. Sequential: cleanup -> wait -> restart core -> reload config -> (optional) auto-start
+
+      // Step 1: Clean up possible residual state
+      await globalState.handleStop();
+
+      // Step 2: Wait a bit for system to clean resources
+      await Future.delayed(const Duration(milliseconds: 750));
+
+      // Step 3: Reload config
+      await applyProfile();
+
+      // Step 4: If auto-run enabled, delay startup
+      if (autoRun) {
+        commonPrint.log('Waiting for system stabilization...');
+        // Delay to simulate user "manual startup" timing
+        await Future.delayed(const Duration(milliseconds: 750));
+
+        commonPrint.log('Executing delayed AutoRun...');
+        await updateStatus(true);
+      } else {
+        commonPrint.log('Waiting for user action...');
+      }
+
+      addCheckIpNumDebounce();
+      commonPrint.log('Recovery sequence completed');
+
+      // Return directly, skip default startup logic below
+      return;
+    }
+
+    final status = globalState.isStart == true
+        ? true
+        : _ref.read(appSettingProvider).autoRun;
+
+    await updateStatus(status);
+
+    // Force config sync: fix Android abnormal exit (swiped app) restart connection issue
+    // Core may start but config could be missing, need manual resend
+    if (system.isAndroid && status) {
+      commonPrint.log('Force applying profile...');
+      await applyProfile(silence: true);
+    }
+
+    if (!status) {
+      addCheckIpNumDebounce();
+    }
+  }
+
+  void setDelay(Delay delay) {
+    _ref.read(delayDataSourceProvider.notifier).setDelay(delay);
+  }
+
+  void toPage(PageLabel pageLabel) {
+    _ref.read(currentPageLabelProvider.notifier).value = pageLabel;
+  }
+
+  void toProfiles() {
+    toPage(PageLabel.profiles);
+  }
+
+  void initLink() {
+    linkManager.initAppLinksListen((url) async {
+      final res = await globalState.showMessage(
+        title: '${appLocalizations.add}${appLocalizations.profile}',
+        message: TextSpan(
+          children: [
+            TextSpan(text: appLocalizations.doYouWantToPass),
+            TextSpan(
+              text: ' $url ',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                decoration: TextDecoration.underline,
+                decorationColor: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            TextSpan(
+              text: '${appLocalizations.create}${appLocalizations.profile}',
+            ),
+          ],
+        ),
+      );
+
+      if (res != true) {
+        return;
+      }
+      addProfileFormURL(url);
+    });
+  }
+
+  Future<bool> showDisclaimer() async {
+    return await globalState.showCommonDialog<bool>(
+          dismissible: false,
+          child: CommonDialog(
+            title: appLocalizations.disclaimer,
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop<bool>(false);
+                },
+                child: Text(appLocalizations.exit),
+              ),
+              TextButton(
+                onPressed: () {
+                  _ref
+                      .read(appSettingProvider.notifier)
+                      .updateState(
+                        (state) => state.copyWith(disclaimerAccepted: true),
+                      );
+                  Navigator.of(context).pop<bool>(true);
+                },
+                child: Text(appLocalizations.agree),
+              ),
+            ],
+            child: SelectableText(appLocalizations.disclaimerDesc),
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _handlerDisclaimer() async {
+    if (_ref.read(appSettingProvider).disclaimerAccepted) {
+      return;
+    }
+    final isDisclaimerAccepted = await showDisclaimer();
+    if (!isDisclaimerAccepted) {
+      await handleExit();
+    }
+    return;
+  }
+
+  Future<void> addProfileFormURL(String url) async {
+    if (globalState.navigatorKey.currentState?.canPop() ?? false) {
+      globalState.navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    }
+    toProfiles();
+
+    final profile = await safeRun(
+      () async {
+        return await Profile.normal(url: url).update();
+      },
+      needLoading: true,
+      title: '${appLocalizations.add}${appLocalizations.profile}',
+    );
+    if (profile != null) {
+      await addProfile(profile);
+    }
+  }
+
+  Future<void> addProfileFormFile() async {
+    final platformFile = await safeRun(picker.pickerFile);
+    final bytes = platformFile?.bytes;
+    if (bytes == null) {
+      return;
+    }
+    if (!context.mounted) return;
+    globalState.navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    toProfiles();
+
+    final profile = await safeRun(
+      () async {
+        await Future.delayed(const Duration(milliseconds: 300));
+        return await Profile.normal(label: platformFile?.name).saveFile(bytes);
+      },
+      needLoading: true,
+      title: '${appLocalizations.add}${appLocalizations.profile}',
+    );
+    if (profile != null) {
+      await addProfile(profile);
+    }
+  }
+
+  Future<void> addProfileFormQrCode() async {
+    final url = await safeRun(picker.pickerConfigQRCode);
+    if (url == null) return;
+    addProfileFormURL(url);
+  }
+
+  void updateViewSize(Size size) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ref.read(viewSizeProvider.notifier).value = size;
+    });
+  }
+
+  void setProvider(ExternalProvider? provider) {
+    _ref.read(providersProvider.notifier).setProvider(provider);
+  }
+
+  List<Proxy> _sortOfName(List<Proxy> proxies) {
+    return List.of(proxies)..sort(
+      (a, b) =>
+          utils.sortByChar(utils.getPinyin(a.name), utils.getPinyin(b.name)),
+    );
+  }
+
+  List<Proxy> _sortOfDelay({required List<Proxy> proxies, String? testUrl}) {
+    return List.of(proxies)..sort((a, b) {
+      final aDelay = _ref.read(
+        getDelayProvider(proxyName: a.name, testUrl: testUrl),
+      );
+      final bDelay = _ref.read(
+        getDelayProvider(proxyName: b.name, testUrl: testUrl),
+      );
+      if (aDelay == null && bDelay == null) {
+        return 0;
+      }
+      if (aDelay == null || aDelay == -1) {
+        return 1;
+      }
+      if (bDelay == null || bDelay == -1) {
+        return -1;
+      }
+      return aDelay.compareTo(bDelay);
+    });
+  }
+
+  List<Proxy> getSortProxies({
+    required List<Proxy> proxies,
+    required ProxiesSortType sortType,
+    String? testUrl,
+  }) {
+    return switch (sortType) {
+      ProxiesSortType.none => proxies,
+      ProxiesSortType.delay => _sortOfDelay(proxies: proxies, testUrl: testUrl),
+      ProxiesSortType.name => _sortOfName(proxies),
+    };
+  }
+
+  Future<Null> clearEffect(String profileId) async {
+    final profilePath = await appPath.getProfilePath(profileId);
+    final providersDirPath = await appPath.getProvidersDirPath(profileId);
+    return await Isolate.run(() async {
+      final profileFile = File(profilePath);
+      final isExists = await profileFile.exists();
+      if (isExists) {
+        profileFile.delete(recursive: true);
+      }
+      final providersFileDir = File(providersDirPath);
+      final providersFileIsExists = await providersFileDir.exists();
+      if (providersFileIsExists) {
+        providersFileDir.delete(recursive: true);
+      }
+    });
+  }
+
+  void updateTun() {
+    _ref
+        .read(patchClashConfigProvider.notifier)
+        .updateState((state) => state.copyWith.tun(enable: !state.tun.enable));
+  }
+
+  void updateSystemProxy() {
+    _ref
+        .read(networkSettingProvider.notifier)
+        .updateState(
+          (state) => state.copyWith(systemProxy: !state.systemProxy),
+        );
+  }
+
+  Future<List<Package>> getPackages() async {
+    // Remove unnecessary delay, load directly async
+    if (_ref.read(packagesProvider).isEmpty) {
+      final packages = await app.getPackages();
+      _ref.read(packagesProvider.notifier).value = packages;
+    }
+    return _ref.read(packagesProvider);
+  }
+
+  void updateStart() {
+    updateStatus(!_ref.read(runTimeProvider.notifier).isStart);
+  }
+
+  void updateCurrentSelectedMap(String groupName, String proxyName) {
+    final currentProfile = _ref.read(currentProfileProvider);
+    if (currentProfile != null &&
+        currentProfile.selectedMap[groupName] != proxyName) {
+      final SelectedMap selectedMap = Map.from(currentProfile.selectedMap)
+        ..[groupName] = proxyName;
+      _ref
+          .read(profilesProvider.notifier)
+          .setProfile(currentProfile.copyWith(selectedMap: selectedMap));
+    }
+  }
+
+  void updateCurrentUnfoldSet(Set<String> value) {
+    final currentProfile = _ref.read(currentProfileProvider);
+    if (currentProfile == null) {
+      return;
+    }
+    _ref
+        .read(profilesProvider.notifier)
+        .setProfile(currentProfile.copyWith(unfoldSet: value));
+  }
+
+  void changeMode(Mode mode) {
+    _ref
+        .read(patchClashConfigProvider.notifier)
+        .updateState((state) => state.copyWith(mode: mode));
+    if (mode == Mode.global) {
+      updateCurrentGroupName(GroupName.GLOBAL.name);
+    }
+    addCheckIpNumDebounce();
+  }
+
+  void updateAutoLaunch() {
+    _ref
+        .read(appSettingProvider.notifier)
+        .updateState((state) => state.copyWith(autoLaunch: !state.autoLaunch));
+  }
+
+  Future<void> updateVisible() async {
+    final visible = await window?.isVisible;
+    if (visible != null && !visible) {
+      window?.show();
+    } else {
+      window?.hide();
+    }
+  }
+
+  void updateMode() {
+    _ref.read(patchClashConfigProvider.notifier).updateState((state) {
+      final index = Mode.values.indexWhere((item) => item == state.mode);
+      if (index == -1) {
+        return null;
+      }
+      final nextIndex = index + 1 > Mode.values.length - 1 ? 0 : index + 1;
+      return state.copyWith(mode: Mode.values[nextIndex]);
+    });
+  }
+
+  Future<void> handleAddOrUpdate(WidgetRef ref, [Rule? rule]) async {
+    final res = await globalState.showCommonDialog<Rule>(
+      child: AddRuleDialog(
+        rule: rule,
+        snippet: ref.read(
+          profileOverrideStateProvider.select((state) => state.snippet!),
+        ),
+      ),
+    );
+    if (res == null) {
+      return;
+    }
+    ref.read(profileOverrideStateProvider.notifier).updateState((state) {
+      final model = state.copyWith.overrideData!(
+        rule: state.overrideData!.rule.updateRules((rules) {
+          final index = rules.indexWhere((item) => item.id == res.id);
+          if (index == -1) {
+            return List.from([res, ...rules]);
+          }
+          return List.from(rules)..[index] = res;
+        }),
+      );
+      return model;
+    });
+  }
+
+  Future<bool> exportLogs() async {
+    final logsRaw = _ref.read(logsProvider).list.map((item) => item.toString());
+    final data = await Isolate.run<List<int>>(() async {
+      final logsRawString = logsRaw.join('\n');
+      return utf8.encode(logsRawString);
+    });
+    return await picker.saveFile(utils.logFile, Uint8List.fromList(data)) !=
+        null;
+  }
+
+  Future<List<int>> backupData() async {
+    final homeDirPath = await appPath.homeDirPath;
+    final profilesPath = await appPath.profilesPath;
+    final configJson = globalState.config.toJson();
+
+    // Get valid profile IDs
+    final validProfileIds = globalState.config.profiles
+        .map((p) => p.id)
+        .toSet();
+    final currentProfileId = globalState.config.currentProfileId;
+
+    commonPrint.log(
+      'Starting backup: ${validProfileIds.length} profiles, current: $currentProfileId',
+    );
+
+    return Isolate.run<List<int>>(() async {
+      final archive = Archive();
+
+      // Add Bettbox marker file
+      final markerData = json.encode({
+        'app': 'Bettbox',
+        'version': '1.0',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+      final markerBytes = utf8.encode(markerData);
+      final markerFile = ArchiveFile(
+        '.bettbox_marker',
+        markerBytes.length,
+        markerBytes,
+      );
+      archive.addFile(markerFile);
+
+      // Add config file
+      final configBytes = utf8.encode(json.encode(configJson));
+      final configFile = ArchiveFile(
+        'config.json',
+        configBytes.length,
+        configBytes,
+      );
+      archive.addFile(configFile);
+
+      // Add profiles dir (valid subscriptions only)
+      final profilesDir = Directory(profilesPath);
+      if (await profilesDir.exists()) {
+        final files = profilesDir.listSync(
+          recursive: false,
+        ); // First level only
+
+        for (final file in files) {
+          if (file is File) {
+            // Check if valid subscription config
+            final fileName = basename(file.path);
+            final profileId = fileName.replaceAll(RegExp(r'\.(yaml|yml)$'), '');
+
+            if (validProfileIds.contains(profileId)) {
+              // Normalize path: use Unix-style / separator
+              final relativePath = relative(
+                file.path,
+                from: homeDirPath,
+              ).replaceAll('\\', '/');
+              final bytes = await file.readAsBytes();
+              final archiveFile = ArchiveFile(
+                relativePath,
+                bytes.length,
+                bytes,
+              );
+              archive.addFile(archiveFile);
+            }
+          }
+        }
+
+        // Add current active subscription Providers
+        if (currentProfileId != null &&
+            validProfileIds.contains(currentProfileId)) {
+          final providersDir = Directory(
+            join(profilesPath, 'providers', currentProfileId),
+          );
+
+          if (await providersDir.exists()) {
+            final providerFiles = providersDir.listSync(recursive: true);
+
+            for (final providerFile in providerFiles) {
+              if (providerFile is File) {
+                final relativePath = relative(
+                  providerFile.path,
+                  from: homeDirPath,
+                ).replaceAll('\\', '/');
+                final bytes = await providerFile.readAsBytes();
+                final archiveFile = ArchiveFile(
+                  relativePath,
+                  bytes.length,
+                  bytes,
+                );
+                archive.addFile(archiveFile);
+              }
+            }
+          }
+        }
+      }
+
+      // Encode as ZIP (same as old version)
+      final zipEncoder = ZipEncoder();
+      return zipEncoder.encode(archive) ?? [];
+    });
+  }
+
+  Future<void> updateTray([bool focus = false]) async {
+    final trayState = await _ref.read(trayStateProvider.future);
+    tray.update(trayState: trayState);
+  }
+
+  /// Restore data from bytes
+  Future<void> recoveryData(
+    List<int> data,
+    RecoveryOption recoveryOption,
+  ) async {
+    try {
+      commonPrint.log('Starting recovery from bytes: ${data.length} bytes');
+
+      final archive = await Isolate.run<Archive>(() {
+        final zipDecoder = ZipDecoder();
+        return zipDecoder.decodeBytes(data);
+      });
+
+      commonPrint.log('Archive decoded: ${archive.files.length} files');
+      await _recoveryFromArchive(archive, recoveryOption);
+    } catch (e) {
+      commonPrint.log('Recovery failed: $e');
+      throw 'Backup file is corrupted or invalid: $e';
+    }
+  }
+
+  /// Restore data from file path
+  Future<void> recoveryDataFromFile(
+    String path,
+    RecoveryOption recoveryOption,
+  ) async {
+    try {
+      commonPrint.log('Starting recovery from file: $path');
+
+      final archive = await Isolate.run<Archive>(() {
+        final input = InputFileStream(path);
+        try {
+          final zipDecoder = ZipDecoder();
+          final archive = zipDecoder.decodeBuffer(input);
+          return archive;
+        } finally {
+          input.close();
+        }
+      });
+
+      commonPrint.log('Archive decoded: ${archive.files.length} files');
+      await _recoveryFromArchive(archive, recoveryOption);
+    } catch (e) {
+      commonPrint.log('Recovery failed: $e');
+      throw 'Backup file is corrupted or invalid: $e';
+    }
+  }
+
+  /// Unified recovery entry: check marker and dispatch to recovery logic
+  Future<void> _recoveryFromArchive(
+    Archive archive,
+    RecoveryOption recoveryOption,
+  ) async {
+    final homeDirPath = await appPath.homeDirPath;
+
+    // Check for Bettbox marker
+    final hasBettboxMarker = archive.files.any(
+      (file) => file.name == '.bettbox_marker',
+    );
+
+    if (hasBettboxMarker) {
+      // Bettbox backup: full recovery based on user choice
+      await _recoveryBettboxBackup(archive, recoveryOption, homeDirPath);
+    } else {
+      // Non-Bettbox backup (e.g., FlClash): restore subscriptions only
+      await _recoveryLegacyBackup(archive, recoveryOption, homeDirPath);
+    }
+  }
+
+  /// Restore Bettbox backup (full recovery)
+  /// Decide recovery scope based on RecoveryOption
+  Future<void> _recoveryBettboxBackup(
+    Archive archive,
+    RecoveryOption recoveryOption,
+    String homeDirPath,
+  ) async {
+    // Separate config and profile files
+    final configs = archive.files
+        .where(
+          (item) =>
+              item.name.endsWith('.json') && item.name != '.bettbox_marker',
+        )
+        .toList();
+    final profiles = archive.files.where(
+      (item) => !item.name.endsWith('.json') && item.name != '.bettbox_marker',
+    );
+
+    // Find config.json
+    final configIndex = configs.indexWhere(
+      (config) => config.name == 'config.json',
+    );
+    if (configIndex == -1) throw 'invalid backup file';
+
+    // Parse config
+    final configFile = configs[configIndex];
+    var tempConfig = Config.compatibleFromJson(
+      json.decode(utf8.decode(configFile.content)),
+    );
+
+    // Restore profile files to disk
+    for (final profile in profiles) {
+      final filePath = join(homeDirPath, profile.name);
+      final file = File(filePath);
+      await file.create(recursive: true);
+      await file.writeAsBytes(profile.content);
+    }
+
+    // Apply recovery logic
+    _recovery(tempConfig, recoveryOption);
+  }
+
+  /// Restore non-Bettbox backup (subscriptions and app list only)
+  /// Restore subscriptions regardless of recovery mode
+  Future<void> _recoveryLegacyBackup(
+    Archive archive,
+    RecoveryOption recoveryOption,
+    String homeDirPath,
+  ) async {
+    // Separate config and profile files
+    final configs = archive.files
+        .where((item) => item.name.endsWith('.json'))
+        .toList();
+    final profileFiles = archive.files
+        .where(
+          (item) =>
+              !item.name.endsWith('.json') && !item.name.endsWith('.sqlite'),
+        )
+        .toList();
+
+    // Find config.json
+    final configIndex = configs.indexWhere(
+      (config) => config.name == 'config.json',
+    );
+    if (configIndex == -1) throw 'invalid backup file';
+
+    // Parse backup config
+    final configFile = configs[configIndex];
+    final backupConfig = Config.compatibleFromJson(
+      json.decode(utf8.decode(configFile.content)),
+    );
+
+    // Restore profile files to disk
+    for (final profile in profileFiles) {
+      final filePath = join(homeDirPath, profile.name);
+      final file = File(filePath);
+      await file.create(recursive: true);
+      await file.writeAsBytes(profile.content);
+    }
+
+    // Extract profiles from backup
+    List<Profile> profiles = [];
+    bool extractedFromDatabase = false;
+
+    // 1. Try SQLite database first (FlClash backup)
+    final dbFile = archive.files.firstWhereOrNull(
+      (file) => file.name.endsWith('database.sqlite'),
+    );
+
+    if (dbFile != null) {
+      try {
+        // Save database temporarily
+        final tempDbPath = join(await appPath.tempPath, 'temp_flclash.db');
+        final tempDb = File(tempDbPath);
+        await tempDb.writeAsBytes(dbFile.content);
+
+        // Extract profiles from database
+        profiles = await FlClashDatabaseExtractor.extractProfiles(tempDbPath);
+        extractedFromDatabase = true;
+
+        // Clean up temp file
+        if (await tempDb.exists()) {
+          await tempDb.delete();
+        }
+
+        commonPrint.log(
+          'Extracted ${profiles.length} profiles from FlClash database',
+        );
+      } catch (e) {
+        commonPrint.log(
+          'Failed to extract from database, fallback to file names: $e',
+        );
+        profiles = [];
+        extractedFromDatabase = false;
+      }
+    }
+
+    // 2. Fallback if database extraction failed
+    if (profiles.isEmpty) {
+      // Get from config.json
+      if (backupConfig.profiles.isNotEmpty) {
+        profiles = backupConfig.profiles;
+      } else {
+        // Extract ID from profile file names (FlClash mode)
+        for (final profileFile in profileFiles) {
+          final fileName = profileFile.name.split('/').last;
+          if (fileName.endsWith('.yaml') || fileName.endsWith('.yml')) {
+            final id = fileName.replaceAll(RegExp(r'\.(yaml|yml)$'), '');
+
+            // Try to extract friendly label from YAML
+            final label = await _extractLabelFromYaml(profileFile) ?? id;
+
+            // Create basic Profile object
+            profiles.add(
+              Profile(
+                id: id,
+                label: label,
+                autoUpdateDuration: defaultUpdateDuration,
+                url: '', // Mark empty, user needs to add
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    // Create limited recovery config (subscriptions only)
+    Config limitedConfig = globalState.config.copyWith(profiles: profiles);
+
+    // Android: also restore app list
+    if (system.isAndroid) {
+      // FlClash uses accessControlProps instead of accessControl
+      final vpnProps = backupConfig.vpnProps;
+      AccessControl? accessControl;
+
+      // Try to get from vpnProps.accessControl
+      try {
+        accessControl = vpnProps.accessControl;
+      } catch (_) {
+        // Fallback: try accessControlProps from raw JSON
+        try {
+          final configJson = json.decode(utf8.decode(configFile.content));
+          final vpnPropsJson = configJson['vpnProps'];
+          if (vpnPropsJson != null && vpnPropsJson is Map) {
+            final accessControlPropsJson = vpnPropsJson['accessControlProps'];
+            if (accessControlPropsJson != null) {
+              accessControl = AccessControl.fromJson(
+                accessControlPropsJson as Map<String, dynamic>,
+              );
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (accessControl != null) {
+        limitedConfig = limitedConfig.copyWith.vpnProps(
+          accessControl: accessControl,
+        );
+      }
+    }
+
+    // Apply limited recovery
+    _recoveryLimited(limitedConfig, recoveryOption);
+
+    // Show recovery result message
+    _showRecoveryResultMessage(profiles, extractedFromDatabase);
+  }
+
+  /// Extract friendly label from YAML file
+  Future<String?> _extractLabelFromYaml(ArchiveFile profileFile) async {
+    try {
+      final yamlContent = utf8.decode(profileFile.content);
+
+      // Try to extract from comments
+      final lines = yamlContent.split('\n');
+      for (final line in lines) {
+        if (line.trim().startsWith('#')) {
+          final comment = line.trim().substring(1).trim();
+          if (comment.isNotEmpty &&
+              comment.length < 50 &&
+              !comment.startsWith('!')) {
+            return comment;
+          }
+        }
+      }
+
+      // Try to extract from first proxy name
+      final yamlMap = loadYaml(yamlContent);
+      if (yamlMap is Map && yamlMap['proxies'] is List) {
+        final proxies = yamlMap['proxies'] as List;
+        if (proxies.isNotEmpty && proxies[0] is Map) {
+          final firstProxy = proxies[0] as Map;
+          final name = firstProxy['name'];
+          if (name != null && name.toString().isNotEmpty) {
+            return 'Sub - $name';
+          }
+        }
+      }
+    } catch (e) {
+      commonPrint.log('Failed to extract label from YAML: $e');
+    }
+    return null;
+  }
+
+  /// Show recovery result message
+  void _showRecoveryResultMessage(
+    List<Profile> profiles,
+    bool extractedFromDatabase,
+  ) {
+    if (profiles.isEmpty) return;
+
+    final hasEmptyUrl = profiles.any((p) => p.url.isEmpty);
+
+    String message;
+    if (extractedFromDatabase) {
+      // Successfully extracted from database
+      message = 'Restored ${profiles.length} subscriptions with URLs.';
+    } else if (hasEmptyUrl) {
+      // Partial recovery, missing URLs
+      message =
+          'Restored ${profiles.length} subscriptions.\n\n'
+          '⚠️ URLs not included. Edit subscriptions to add URLs for auto-update.';
+    } else {
+      // Complete recovery
+      message = 'Restored ${profiles.length} subscriptions.';
+    }
+
+    globalState.showMessage(
+      title: appLocalizations.recoverySuccess,
+      message: TextSpan(text: message),
+    );
+  }
+
+  /// Limited recovery (subscriptions and app list only)
+  /// Used for non-Bettbox backup recovery
+  void _recoveryLimited(Config config, RecoveryOption recoveryOption) {
+    final recoveryStrategy = _ref.read(
+      appSettingProvider.select((state) => state.recoveryStrategy),
+    );
+    final profiles = config.profiles;
+
+    // Restore subscriptions
+    if (recoveryStrategy == RecoveryStrategy.override) {
+      // Override mode: replace all subscriptions
+      _ref.read(profilesProvider.notifier).value = profiles;
+    } else {
+      // Merge mode: add subscriptions one by one
+      for (final profile in profiles) {
+        _ref.read(profilesProvider.notifier).setProfile(profile);
+      }
+    }
+
+    // Android: restore app list
+    if (system.isAndroid) {
+      _ref
+          .read(vpnSettingProvider.notifier)
+          .updateState(
+            (state) =>
+                state.copyWith(accessControl: config.vpnProps.accessControl),
+          );
+    }
+
+    // Ensure current profile exists
+    final currentProfile = _ref.read(currentProfileProvider);
+    if (currentProfile == null && profiles.isNotEmpty) {
+      _ref.read(currentProfileIdProvider.notifier).value = profiles.first.id;
+    }
+  }
+
+  /// Full recovery (Bettbox backup)
+  /// Decide recovery scope based on RecoveryOption
+  void _recovery(Config config, RecoveryOption recoveryOption) {
+    final recoveryStrategy = _ref.read(
+      appSettingProvider.select((state) => state.recoveryStrategy),
+    );
+    final profiles = config.profiles;
+
+    // Restore subscriptions
+    if (recoveryStrategy == RecoveryStrategy.override) {
+      // Override mode: replace all subscriptions
+      _ref.read(profilesProvider.notifier).value = profiles;
+    } else {
+      // Merge mode: add subscriptions one by one
+      for (final profile in profiles) {
+        _ref.read(profilesProvider.notifier).setProfile(profile);
+      }
+    }
+
+    // Decide recovery scope based on option
+    final onlyProfiles = recoveryOption == RecoveryOption.onlyProfiles;
+    if (!onlyProfiles) {
+      // Restore all settings with smart platform-specific merging
+
+      // 1. Smart Clash config recovery
+      if (system.isDesktop) {
+        // Desktop: preserve current TUN state, avoid mobile backup override
+        final currentTunEnable = _ref.read(patchClashConfigProvider).tun.enable;
+        _ref.read(patchClashConfigProvider.notifier).value = config
+            .patchClashConfig
+            .copyWith
+            .tun(enable: currentTunEnable);
+      } else {
+        // Mobile: restore directly
+        _ref.read(patchClashConfigProvider.notifier).value =
+            config.patchClashConfig;
+      }
+
+      // 2. Smart app settings recovery
+      final currentAppSetting = _ref.read(appSettingProvider);
+      final backupAppSetting = config.appSetting;
+
+      // Merge dashboardWidgets: preserve platform-specific widgets
+      final currentWidgets = currentAppSetting.dashboardWidgets;
+      final backupWidgets = backupAppSetting.dashboardWidgets;
+      final mergedWidgets = _mergeDashboardWidgets(
+        currentWidgets,
+        backupWidgets,
+      );
+
+      _ref.read(appSettingProvider.notifier).value = backupAppSetting.copyWith(
+        dashboardWidgets: mergedWidgets,
+      );
+
+      // 3. Restore current profile ID
+      _ref.read(currentProfileIdProvider.notifier).value =
+          config.currentProfileId;
+
+      // 4. Restore WebDAV settings
+      _ref.read(appDAVSettingProvider.notifier).value = config.dav;
+
+      // 5. Restore theme settings
+      _ref.read(themeSettingProvider.notifier).value = config.themeProps;
+
+      // 6. Restore window settings (desktop only)
+      if (system.isDesktop) {
+        _ref.read(windowSettingProvider.notifier).value = config.windowProps;
+      }
+
+      // 7. Smart VPN/network settings recovery
+      if (system.isAndroid) {
+        // Android: restore VPN settings
+        _ref.read(vpnSettingProvider.notifier).value = config.vpnProps;
+      } else if (system.isDesktop) {
+        // Desktop: restore network settings, preserve TUN state
+        final currentVpnProps = _ref.read(vpnSettingProvider);
+        _ref.read(networkSettingProvider.notifier).value = config.networkProps;
+
+        // Only restore non-platform-specific VPN settings
+        _ref.read(vpnSettingProvider.notifier).value = config.vpnProps.copyWith(
+          enable: currentVpnProps.enable, // Preserve current TUN state
+        );
+      }
+
+      // 8. Restore proxy style
+      _ref.read(proxiesStyleSettingProvider.notifier).value =
+          config.proxiesStyle;
+
+      // 9. Restore DNS override settings
+      _ref.read(overrideDnsProvider.notifier).value = config.overrideDns;
+
+      // 10. Restore hotkey settings (desktop only)
+      if (system.isDesktop) {
+        _ref.read(hotKeyActionsProvider.notifier).value = config.hotKeyActions;
+      }
+
+      // 11. Restore script settings
+      _ref.read(scriptStateProvider.notifier).value = config.scriptProps;
+    }
+
+    // Ensure current profile exists
+    final currentProfile = _ref.read(currentProfileProvider);
+    if (currentProfile == null && profiles.isNotEmpty) {
+      _ref.read(currentProfileIdProvider.notifier).value = profiles.first.id;
+    }
+  }
+
+  /// Merge dashboard widgets list
+  /// Preserve platform-specific widgets at original positions
+  List<DashboardWidget> _mergeDashboardWidgets(
+    List<DashboardWidget> currentWidgets,
+    List<DashboardWidget> backupWidgets,
+  ) {
+    // Define platform-specific widgets
+    final Set<DashboardWidget> androidOnlyWidgets = {
+      // Android-specific widgets (if any)
+    };
+
+    final Set<DashboardWidget> desktopOnlyWidgets = {
+      DashboardWidget.tunButton, // TUN button (desktop-specific)
+      DashboardWidget
+          .systemProxyButton, // System proxy button (more common on desktop)
+    };
+
+    // Determine platform-specific widgets
+    final platformSpecificWidgets = system.isAndroid
+        ? androidOnlyWidgets
+        : desktopOnlyWidgets;
+
+    // Build position map for platform-specific widgets
+    final platformWidgetPositions = <DashboardWidget, int>{};
+    for (var i = 0; i < currentWidgets.length; i++) {
+      final widget = currentWidgets[i];
+      if (platformSpecificWidgets.contains(widget)) {
+        platformWidgetPositions[widget] = i;
+      }
+    }
+
+    // Get non-platform-specific widgets from backup
+    final backupCommonWidgets = backupWidgets
+        .where((widget) => !platformSpecificWidgets.contains(widget))
+        .toList();
+
+    // Merge strategy: insert platform-specific widgets at original positions
+    final mergedWidgets = <DashboardWidget>[...backupCommonWidgets];
+
+    // Insert platform-specific widgets by position (smallest first)
+    final sortedEntries = platformWidgetPositions.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+
+    for (final entry in sortedEntries) {
+      final widget = entry.key;
+      final originalPosition = entry.value;
+
+      // Insert position cannot exceed list length
+      final insertPosition = originalPosition.clamp(0, mergedWidgets.length);
+      mergedWidgets.insert(insertPosition, widget);
+    }
+
+    // Use default widgets if merged is empty
+    return mergedWidgets.isNotEmpty ? mergedWidgets : defaultDashboardWidgets;
+  }
+
+  Future<T?> safeRun<T>(
+    FutureOr<T> Function() futureFunction, {
+    String? title,
+    bool needLoading = false,
+    bool silence = true,
+  }) async {
+    final realSilence = needLoading == true ? true : silence;
+    try {
+      if (needLoading) {
+        _ref.read(loadingProvider.notifier).value = true;
+      }
+      final res = await futureFunction();
+      return res;
+    } catch (e) {
+      commonPrint.log('$e');
+      if (realSilence) {
+        globalState.showNotifier(e.toString());
+      } else {
+        globalState.showMessage(
+          title: title ?? appLocalizations.tip,
+          message: TextSpan(text: e.toString()),
+        );
+      }
+      return null;
+    } finally {
+      _ref.read(loadingProvider.notifier).value = false;
+    }
+  }
+}

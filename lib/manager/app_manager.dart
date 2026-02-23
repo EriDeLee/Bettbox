@@ -1,0 +1,358 @@
+import 'dart:async';
+
+import 'package:bett_box/common/common.dart';
+import 'package:bett_box/enum/enum.dart';
+import 'package:bett_box/manager/window_manager.dart';
+import 'package:bett_box/providers/providers.dart';
+import 'package:bett_box/state.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_acrylic/widgets/transparent_macos_sidebar.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:window_manager/window_manager.dart';
+
+class AppStateManager extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const AppStateManager({super.key, required this.child});
+
+  @override
+  ConsumerState<AppStateManager> createState() => _AppStateManagerState();
+}
+
+class _AppStateManagerState extends ConsumerState<AppStateManager>
+    with WidgetsBindingObserver {
+  bool _isDashboardActive = false;
+  Timer? _dashboardRefreshDebounceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ref.listenManual(layoutChangeProvider, (prev, next) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (prev != next) {
+          globalState.computeHeightMapCache = {};
+        }
+      });
+    });
+    ref.listenManual(checkIpProvider, (prev, next) {
+      if (prev != next && next.b) {
+        detectionState.startCheck();
+      }
+    });
+    ref.listenManual(configStateProvider, (prev, next) {
+      if (prev != next) {
+        globalState.appController.savePreferencesDebounce();
+      }
+    });
+    ref.listenManual(currentPageLabelProvider, (prev, next) {
+      if (prev != next) {
+        _updateDashboardRefreshState();
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateDashboardRefreshState();
+    });
+    if (window == null) {
+      return;
+    }
+    ref.listenManual(autoSetSystemDnsStateProvider, (prev, next) async {
+      if (prev == next) {
+        return;
+      }
+      if (next.a == true && next.b == true) {
+        macOS?.updateDns(false);
+      } else {
+        macOS?.updateDns(true);
+      }
+    });
+    ref.listenManual(currentBrightnessProvider, (prev, next) {
+      if (prev == next) {
+        return;
+      }
+      window?.updateMacOSBrightness(next);
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _dashboardRefreshDebounceTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _updateDashboardRefreshState() async {
+    final isDashboard =
+        ref.read(currentPageLabelProvider) == PageLabel.dashboard;
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    final isForeground =
+        lifecycleState == null || lifecycleState == AppLifecycleState.resumed;
+    var isVisible = true;
+    if (system.isDesktop) {
+      final visible = await window?.isVisible;
+      if (visible == false) {
+        isVisible = false;
+      }
+    }
+    final shouldRun = isDashboard && isForeground && isVisible;
+
+    if (!shouldRun) {
+      _dashboardRefreshDebounceTimer?.cancel();
+      _dashboardRefreshDebounceTimer = null;
+      if (_isDashboardActive) {
+        dashboardRefreshManager.stop();
+        _isDashboardActive = false;
+      }
+      return;
+    }
+
+    if (_isDashboardActive) {
+      return;
+    }
+
+    _dashboardRefreshDebounceTimer?.cancel();
+    _dashboardRefreshDebounceTimer = Timer(
+      const Duration(milliseconds: 1000),
+      () {
+        if (!mounted) return;
+        if (_isDashboardActive) return;
+        dashboardRefreshManager.start();
+        _isDashboardActive = true;
+        final hasDetection = ref
+            .read(dashboardStateProvider)
+            .dashboardWidgets
+            .contains(DashboardWidget.networkDetection);
+        if (hasDetection) {
+          detectionState.tryStartCheck();
+        }
+      },
+    );
+  }
+
+  @override
+  Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      globalState.appController.savePreferences();
+      render?.pause();
+      globalState.stopUpdateTasks();
+    } else {
+      render?.active();
+      if (state == AppLifecycleState.resumed && globalState.isStart) {
+        await globalState.startUpdateTasks();
+      }
+    }
+    if (state == AppLifecycleState.inactive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        detectionState.tryStartCheck();
+      });
+    }
+    _updateDashboardRefreshState();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    globalState.appController.updateBrightness();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) {
+        render?.active();
+      },
+      onPointerHover: (_) {
+        render?.active();
+      },
+      child: widget.child,
+    );
+  }
+}
+
+class AppEnvManager extends StatelessWidget {
+  final Widget child;
+
+  const AppEnvManager({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (kDebugMode) {
+      if (globalState.isPre) {
+        return Banner(
+          message: 'DEBUG',
+          location: BannerLocation.topEnd,
+          child: child,
+        );
+      }
+    }
+    if (globalState.isPre) {
+      return Banner(
+        message: 'PRE',
+        location: BannerLocation.topEnd,
+        child: child,
+      );
+    }
+    return child;
+  }
+}
+
+class AppSidebarContainer extends ConsumerWidget {
+  final Widget child;
+
+  const AppSidebarContainer({super.key, required this.child});
+
+  Widget _buildLoading() {
+    return Consumer(
+      builder: (_, ref, _) {
+        final loading = ref.watch(loadingProvider);
+        final isMobileView = ref.watch(isMobileViewProvider);
+        return loading && !isMobileView
+            ? RotatedBox(
+                quarterTurns: 1,
+                child: const LinearProgressIndicator(),
+              )
+            : Container();
+      },
+    );
+  }
+
+  Widget _buildBackground({
+    required BuildContext context,
+    required Widget child,
+  }) {
+    if (!system.isMacOS) {
+      return Material(
+        color: context.colorScheme.surfaceContainer,
+        child: child,
+      );
+    }
+    return TransparentMacOSSidebar(
+      child: Material(color: Colors.transparent, child: child),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final navigationState = ref.watch(navigationStateProvider);
+    final navigationItems = navigationState.navigationItems;
+    final isMobileView = navigationState.viewMode == ViewMode.mobile;
+    if (isMobileView) {
+      return child;
+    }
+    final currentIndex = navigationState.currentIndex;
+    final showLabel = ref.watch(appSettingProvider).showLabel;
+    final viewPadding = MediaQuery.paddingOf(context);
+    final sidebarPadding = system.isAndroid
+        ? EdgeInsets.only(left: viewPadding.left, top: viewPadding.top)
+        : EdgeInsets.zero;
+    final topSpacerHeight = system.isAndroid
+        ? 12.0
+        : (system.isMacOS ? 32.0 : 24.0);
+    return Row(
+      children: [
+        Stack(
+          alignment: Alignment.topRight,
+          children: [
+            _buildBackground(
+              context: context,
+              child: Padding(
+                padding: sidebarPadding,
+                child: Column(
+                  children: [
+                    SizedBox(height: topSpacerHeight),
+                    if (!system.isMacOS) ...[AppIcon(), SizedBox(height: 12)],
+                    Expanded(
+                      child: ScrollConfiguration(
+                        behavior: HiddenBarScrollBehavior(),
+                        child: SingleChildScrollView(
+                          child: IntrinsicHeight(
+                            child: NavigationRail(
+                              backgroundColor: Colors.transparent,
+                              selectedLabelTextStyle: context
+                                  .textTheme
+                                  .labelLarge!
+                                  .copyWith(
+                                    color: context.colorScheme.onSurface,
+                                  ),
+                              unselectedLabelTextStyle: context
+                                  .textTheme
+                                  .labelLarge!
+                                  .copyWith(
+                                    color: context.colorScheme.onSurface,
+                                  ),
+                              destinations: navigationItems
+                                  .map(
+                                    (e) => NavigationRailDestination(
+                                      icon: e.icon,
+                                      label: Text(Intl.message(e.label.name)),
+                                    ),
+                                  )
+                                  .toList(),
+                              onDestinationSelected: (index) {
+                                globalState.appController.toPage(
+                                  navigationItems[index].label,
+                                );
+                              },
+                              extended: showLabel,
+                              selectedIndex: currentIndex,
+                              labelType: showLabel
+                                  ? NavigationRailLabelType.none
+                                  : NavigationRailLabelType.all,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (window != null) const WindowLockButton(),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ),
+            _buildLoading(),
+          ],
+        ),
+        Expanded(flex: 1, child: ClipRect(child: child)),
+      ],
+    );
+  }
+}
+
+class WindowLockButton extends ConsumerWidget {
+  const WindowLockButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isLocked = ref.watch(
+      windowSettingProvider.select((state) => state.isLocked),
+    );
+
+    return IconButton(
+      onPressed: () async {
+        try {
+          final currentLocked = ref.read(
+            windowSettingProvider.select((state) => state.isLocked),
+          );
+          final newLocked = !currentLocked;
+
+          // 先设置窗口
+          await windowManager.setResizable(!newLocked);
+
+          // 再更新状态
+          ref
+              .read(windowSettingProvider.notifier)
+              .updateState((state) => state.copyWith(isLocked: newLocked));
+        } catch (e) {
+          commonPrint.log('Window Lock Failed: $e');
+        }
+      },
+      icon: Icon(
+        isLocked ? Icons.lock : Icons.lock_open,
+        color: context.colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
