@@ -27,7 +27,9 @@ Future<void> proxyDelayTest(Proxy proxy, [String? testUrl]) async {
   if (state.proxyName.isEmpty) {
     return;
   }
-  // Get and set delay directly
+  // Set testing state
+  appController.setDelay(Delay(url: url, name: state.proxyName, value: 0));
+  // Get and set delay
   appController.setDelay(await clashCore.getDelay(url, state.proxyName));
 }
 
@@ -44,7 +46,9 @@ Future<void> delayTest(List<Proxy> proxies, [String? testUrl]) async {
     if (name.isEmpty) {
       return;
     }
-    // Get and set delay directly
+    // Set testing state
+    appController.setDelay(Delay(url: url, name: name, value: 0));
+    // Get and set delay
     appController.setDelay(await clashCore.getDelay(url, name));
   }).toList();
 

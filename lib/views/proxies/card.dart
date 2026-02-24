@@ -227,36 +227,47 @@ class _ProxyDelayText extends ConsumerWidget {
           final delay = ref.watch(
             getDelayProvider(proxyName: proxy.name, testUrl: testUrl),
           );
-          return delay == null
-              ? SizedBox(
-                  height: measure.labelSmallHeight,
-                  width: measure.labelSmallHeight,
-                  child: delayAnimation == DelayAnimationType.none
-                      ? IconButton(
-                          icon: const Icon(Icons.bolt),
-                          iconSize: measure.labelSmallHeight,
-                          padding: EdgeInsets.zero,
-                          onPressed: _handleTestCurrentDelay,
-                        )
-                      : GestureDetector(
-                          onTap: _handleTestCurrentDelay,
-                          child: _buildDelayAnimation(
-                            delayAnimation,
-                            measure.labelSmallHeight,
-                            context.colorScheme.primary,
-                          ),
-                        ),
-                )
-              : GestureDetector(
-                  onTap: _handleTestCurrentDelay,
-                  child: Text(
-                    delay > 0 ? '$delay ms' : 'Timeout',
-                    style: context.textTheme.labelSmall?.copyWith(
-                      overflow: TextOverflow.ellipsis,
-                      color: utils.getDelayColor(delay),
+          
+          // Testing state: delay == 0
+          if (delay == 0) {
+            return SizedBox(
+              height: measure.labelSmallHeight,
+              width: measure.labelSmallHeight,
+              child: delayAnimation == DelayAnimationType.none
+                  ? const CircularProgressIndicator(strokeWidth: 2)
+                  : _buildDelayAnimation(
+                      delayAnimation,
+                      measure.labelSmallHeight,
+                      context.colorScheme.primary,
                     ),
-                  ),
-                );
+            );
+          }
+          
+          // Not tested yet: delay == null
+          if (delay == null) {
+            return SizedBox(
+              height: measure.labelSmallHeight,
+              width: measure.labelSmallHeight,
+              child: IconButton(
+                icon: const Icon(Icons.bolt),
+                iconSize: measure.labelSmallHeight,
+                padding: EdgeInsets.zero,
+                onPressed: _handleTestCurrentDelay,
+              ),
+            );
+          }
+          
+          // Tested: delay > 0 or delay < 0 (timeout)
+          return GestureDetector(
+            onTap: _handleTestCurrentDelay,
+            child: Text(
+              delay > 0 ? '$delay ms' : 'Timeout',
+              style: context.textTheme.labelSmall?.copyWith(
+                overflow: TextOverflow.ellipsis,
+                color: utils.getDelayColor(delay),
+              ),
+            ),
+          );
         },
       ),
     );
