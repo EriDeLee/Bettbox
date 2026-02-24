@@ -28,7 +28,7 @@
         </tr>
         <tr>
             <td><b>Windows</b></td>
-            <td>Windows 10 1607+</td>
+            <td>Windows 10 +</td>
             <td align=left>
                 <a href="https://github.com/appshubcc/Bettbox/releases/download/vVERSION/Bettbox-VERSION-windows-amd64-setup.exe"><img src="https://img.shields.io/badge/Setup-x64-2d7d9a.svg?logo=windows"></a><br>
                 <a href="https://github.com/appshubcc/Bettbox/releases/download/vVERSION/Bettbox-VERSION-windows-arm64-setup.exe"><img src="https://img.shields.io/badge/Setup-arm64-2d7d9a.svg?logo=windows"></a>
