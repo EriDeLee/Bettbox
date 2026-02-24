@@ -2044,11 +2044,81 @@ class AppLocalizations {
     );
   }
 
-  /// `No Animation`
+  /// `Default`
   String get noAnimation {
+    return Intl.message('Default', name: 'noAnimation', desc: '', args: []);
+  }
+
+  /// `Rotating Circle`
+  String get rotatingCircle {
     return Intl.message(
-      'No Animation',
-      name: 'noAnimation',
+      'Rotating Circle',
+      name: 'rotatingCircle',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `Pulse`
+  String get pulse {
+    return Intl.message('Pulse', name: 'pulse', desc: '', args: []);
+  }
+
+  /// `Spinning Lines`
+  String get spinningLines {
+    return Intl.message(
+      'Spinning Lines',
+      name: 'spinningLines',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `Three In Out`
+  String get threeInOut {
+    return Intl.message('Three In Out', name: 'threeInOut', desc: '', args: []);
+  }
+
+  /// `Three Bounce`
+  String get threeBounce {
+    return Intl.message(
+      'Three Bounce',
+      name: 'threeBounce',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `Circle`
+  String get circle {
+    return Intl.message('Circle', name: 'circle', desc: '', args: []);
+  }
+
+  /// `Fading Circle`
+  String get fadingCircle {
+    return Intl.message(
+      'Fading Circle',
+      name: 'fadingCircle',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `Fading Four`
+  String get fadingFour {
+    return Intl.message('Fading Four', name: 'fadingFour', desc: '', args: []);
+  }
+
+  /// `Wave`
+  String get wave {
+    return Intl.message('Wave', name: 'wave', desc: '', args: []);
+  }
+
+  /// `Double Bounce`
+  String get doubleBounce {
+    return Intl.message(
+      'Double Bounce',
+      name: 'doubleBounce',
       desc: '',
       args: [],
     );

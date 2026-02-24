@@ -180,6 +180,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Already on the latest version",
     ),
     "checking": MessageLookupByLibrary.simpleMessage("Checking..."),
+    "circle": MessageLookupByLibrary.simpleMessage("Circle"),
     "clearCacheDesc": MessageLookupByLibrary.simpleMessage(
       "Clear FakeIP and DNS cache?",
     ),
@@ -303,6 +304,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Do you want to pass",
     ),
     "domain": MessageLookupByLibrary.simpleMessage("Domain"),
+    "doubleBounce": MessageLookupByLibrary.simpleMessage("Double Bounce"),
     "download": MessageLookupByLibrary.simpleMessage("Download"),
     "dozeSuspend": MessageLookupByLibrary.simpleMessage("Doze Support"),
     "dozeSuspendDesc": MessageLookupByLibrary.simpleMessage(
@@ -346,6 +348,8 @@ class MessageLookup extends MessageLookupByLibrary {
     "externalResources": MessageLookupByLibrary.simpleMessage(
       "External Resources",
     ),
+    "fadingCircle": MessageLookupByLibrary.simpleMessage("Fading Circle"),
+    "fadingFour": MessageLookupByLibrary.simpleMessage("Fading Four"),
     "fakeIpFilterMode": MessageLookupByLibrary.simpleMessage(
       "FakeIP Filter Mode",
     ),
@@ -561,7 +565,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "networkSpeed": MessageLookupByLibrary.simpleMessage("Network Speed"),
     "networkType": MessageLookupByLibrary.simpleMessage("Network Type"),
     "neutralScheme": MessageLookupByLibrary.simpleMessage("Neutral"),
-    "noAnimation": MessageLookupByLibrary.simpleMessage("No Animation"),
+    "noAnimation": MessageLookupByLibrary.simpleMessage("Default"),
     "noData": MessageLookupByLibrary.simpleMessage("No Data"),
     "noHotKey": MessageLookupByLibrary.simpleMessage("No Hotkeys"),
     "noIcon": MessageLookupByLibrary.simpleMessage("No Icon"),
@@ -738,6 +742,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Set the Clash listening port",
     ),
     "proxyProviders": MessageLookupByLibrary.simpleMessage("Proxy Providers"),
+    "pulse": MessageLookupByLibrary.simpleMessage("Pulse"),
     "pureBlackMode": MessageLookupByLibrary.simpleMessage("Pure Black Mode"),
     "qrcode": MessageLookupByLibrary.simpleMessage("QR Code"),
     "qrcodeDesc": MessageLookupByLibrary.simpleMessage(
@@ -820,6 +825,7 @@ class MessageLookup extends MessageLookupByLibrary {
       "Restart the app for changes to take effect",
     ),
     "retry": MessageLookupByLibrary.simpleMessage("Retry"),
+    "rotatingCircle": MessageLookupByLibrary.simpleMessage("Rotating Circle"),
     "routeAddress": MessageLookupByLibrary.simpleMessage("Route Address"),
     "routeAddressDesc": MessageLookupByLibrary.simpleMessage(
       "Configure route listen address",
@@ -900,6 +906,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "sourceIp": MessageLookupByLibrary.simpleMessage("Source IP"),
     "specialProxy": MessageLookupByLibrary.simpleMessage("Special Proxy"),
     "specialRules": MessageLookupByLibrary.simpleMessage("Special Rules"),
+    "spinningLines": MessageLookupByLibrary.simpleMessage("Spinning Lines"),
     "stackMode": MessageLookupByLibrary.simpleMessage("Stack Mode"),
     "standard": MessageLookupByLibrary.simpleMessage("Standard"),
     "start": MessageLookupByLibrary.simpleMessage("Start"),
@@ -947,7 +954,9 @@ class MessageLookup extends MessageLookupByLibrary {
       "Set theme color and icon",
     ),
     "themeMode": MessageLookupByLibrary.simpleMessage("Theme Mode"),
+    "threeBounce": MessageLookupByLibrary.simpleMessage("Three Bounce"),
     "threeColumns": MessageLookupByLibrary.simpleMessage("3 Columns"),
+    "threeInOut": MessageLookupByLibrary.simpleMessage("Three In Out"),
     "tight": MessageLookupByLibrary.simpleMessage("Compact"),
     "time": MessageLookupByLibrary.simpleMessage("Time"),
     "tip": MessageLookupByLibrary.simpleMessage("Tip"),
@@ -1022,6 +1031,7 @@ class MessageLookup extends MessageLookupByLibrary {
     "wakelockDescription": MessageLookupByLibrary.simpleMessage(
       "Keeps the screen on and app active in the background without requiring special CPU wakelock permissions.",
     ),
+    "wave": MessageLookupByLibrary.simpleMessage("Wave"),
     "webDAVConfiguration": MessageLookupByLibrary.simpleMessage(
       "WebDAV Configuration",
     ),

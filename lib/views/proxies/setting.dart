@@ -51,16 +51,16 @@ class ProxiesSetting extends StatelessWidget {
   String _getTextForDelayAnimation(DelayAnimationType type) {
     return switch (type) {
       DelayAnimationType.none => appLocalizations.noAnimation,
-      DelayAnimationType.rotatingCircle => 'RotatingCircle',
-      DelayAnimationType.pulse => 'Pulse',
-      DelayAnimationType.spinningLines => 'SpinningLines',
-      DelayAnimationType.threeInOut => 'ThreeInOut',
-      DelayAnimationType.threeBounce => 'ThreeBounce',
-      DelayAnimationType.circle => 'Circle',
-      DelayAnimationType.fadingCircle => 'FadingCircle',
-      DelayAnimationType.fadingFour => 'FadingFour',
-      DelayAnimationType.wave => 'Wave',
-      DelayAnimationType.doubleBounce => 'DoubleBounce',
+      DelayAnimationType.rotatingCircle => appLocalizations.rotatingCircle,
+      DelayAnimationType.pulse => appLocalizations.pulse,
+      DelayAnimationType.spinningLines => appLocalizations.spinningLines,
+      DelayAnimationType.threeInOut => appLocalizations.threeInOut,
+      DelayAnimationType.threeBounce => appLocalizations.threeBounce,
+      DelayAnimationType.circle => appLocalizations.circle,
+      DelayAnimationType.fadingCircle => appLocalizations.fadingCircle,
+      DelayAnimationType.fadingFour => appLocalizations.fadingFour,
+      DelayAnimationType.wave => appLocalizations.wave,
+      DelayAnimationType.doubleBounce => appLocalizations.doubleBounce,
     };
   }
 
