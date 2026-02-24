@@ -33,7 +33,24 @@ object GlobalState {
     @Volatile
     private var lastToggleAt = 0L
 
+    @Volatile
+    var currentRunState: RunState = RunState.STOP
+        private set
+
     val runState: MutableLiveData<RunState> = MutableLiveData<RunState>(RunState.STOP)
+
+    fun updateRunState(newState: RunState) {
+        currentRunState = newState
+        try {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                runState.value = newState
+            } else {
+                runState.postValue(newState)
+            }
+        } catch (e: Exception) {
+            runState.postValue(newState)
+        }
+    }
     var flutterEngine: FlutterEngine? = null
     private var serviceEngine: FlutterEngine? = null
     
@@ -54,7 +71,8 @@ object GlobalState {
                 false
             }
             withContext(Dispatchers.Main){
-                runState.value = if (status) RunState.START else RunState.STOP
+                val newState = if (status) RunState.START else RunState.STOP
+                updateRunState(newState)
             }
         }
     }
@@ -82,8 +100,8 @@ object GlobalState {
 
     fun handleStart(skipDebounce: Boolean = false): Boolean {
         if (!skipDebounce && !acquireToggleSlot()) return false
-        if (runState.value == RunState.STOP) {
-            runState.value = RunState.PENDING
+        if (currentRunState == RunState.STOP) {
+            updateRunState(RunState.PENDING)
             runLock.lock()
             try {
                 val tilePlugin = getCurrentTilePlugin()
@@ -102,8 +120,8 @@ object GlobalState {
 
     fun handleStop(skipDebounce: Boolean = false) {
         if (!skipDebounce && !acquireToggleSlot()) return
-        if (runState.value == RunState.START) {
-            runState.value = RunState.PENDING
+        if (currentRunState == RunState.START) {
+            updateRunState(RunState.PENDING)
             runLock.lock()
             try {
                 getCurrentTilePlugin()?.handleStop()

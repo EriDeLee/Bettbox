@@ -86,7 +86,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         flutterMethodChannel.setMethodCallHandler(this)
         
         // Rebind if VPN running but connection lost
-        if (GlobalState.runState.value == RunState.START && bettBoxService == null) {
+        if (GlobalState.currentRunState == RunState.START && bettBoxService == null) {
             android.util.Log.d("VpnPlugin", "VPN is running but service connection lost, rebinding...")
             // Rebind with saved options
             if (options != null) {
@@ -257,7 +257,9 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     
     private fun handleNetworkChange() {
         if (!quickResponseEnabled) return
-        if (GlobalState.runState.value != RunState.START) return
+        
+        // Check runState to bypass quick response if not running
+        if (GlobalState.currentRunState != RunState.START) return
         
         val currentNetworkType = getCurrentNetworkType()
         if (lastNetworkType == null) {
@@ -300,7 +302,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private suspend fun startForeground() {
         val shouldUpdate = GlobalState.runLock.withLock {
-            GlobalState.runState.value == RunState.START || GlobalState.isSmartStopped
+            GlobalState.currentRunState == RunState.START || GlobalState.isSmartStopped
         }
         if (!shouldUpdate) return
         val data = try {
@@ -370,7 +372,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
         GlobalState.runLock.withLock {
-            if (GlobalState.runState.value == RunState.START) {
+            if (GlobalState.currentRunState == RunState.START) {
                 // Service running, update notice
                 android.util.Log.d("VpnPlugin", "Service reconnected, updating notification")
                 scope.launch {
@@ -381,10 +383,10 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val currentOptions = options
             if (currentOptions == null) {
                 android.util.Log.e("VpnPlugin", "Start service failed: options is null")
-                GlobalState.runState.value = RunState.STOP
+                GlobalState.updateRunState(RunState.STOP)
                 return
             }
-            GlobalState.runState.value = RunState.START
+            GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
             val fd = bettBoxService?.start(currentOptions)
             Core.startTun(
@@ -433,8 +435,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     fun handleStop() {
         GlobalState.runLock.withLock {
-            if (GlobalState.runState.value == RunState.STOP) return
-            GlobalState.runState.value = RunState.STOP
+            if (GlobalState.currentRunState == RunState.STOP) return
+            GlobalState.updateRunState(RunState.STOP)
             lastStartForegroundParams = null
             // Uninstall SuspendModule
             suspendModule?.uninstall()
@@ -453,8 +455,8 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     fun handleSmartStop() {
         GlobalState.runLock.withLock {
-            if (GlobalState.runState.value == RunState.STOP) return
-            GlobalState.runState.value = RunState.STOP
+            if (GlobalState.currentRunState == RunState.STOP) return
+            GlobalState.updateRunState(RunState.STOP)
             GlobalState.isSmartStopped = true
             // Uninstall SuspendModule
             suspendModule?.uninstall()
@@ -474,7 +476,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     fun handleSmartResume(options: VpnOptions): Boolean {
         GlobalState.runLock.withLock {
-            if (GlobalState.runState.value == RunState.START) return true
+            if (GlobalState.currentRunState == RunState.START) return true
             GlobalState.isSmartStopped = false
             this.options = options
             
@@ -484,7 +486,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 return true
             }
             
-            GlobalState.runState.value = RunState.START
+            GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
             val fd = bettBoxService?.start(options)
             Core.startTun(

@@ -34,7 +34,7 @@ class BettboxTileService : TileService() {
     override fun onStartListening() {
         super.onStartListening()
         GlobalState.syncStatus()
-        GlobalState.runState.value?.let { updateTile(it) }
+        updateTile(GlobalState.currentRunState)
         GlobalState.runState.observeForever(observer)
     }
 
