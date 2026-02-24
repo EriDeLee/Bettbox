@@ -476,11 +476,15 @@ class BuildCommand extends Command {
             .where((element) => arch == null ? true : element == arch)
             .map((e) => targetMap[e])
             .toList();
+
+        final buildArgs = archName == 'universal'
+            ? ' --build-target-platform ${defaultTargets.join(",")} --description universal'
+            : ',split-per-abi --build-target-platform ${defaultTargets.join(",")}';
+
         _buildDistributor(
           target: target,
           targets: 'apk',
-          args:
-              ",split-per-abi --build-target-platform ${defaultTargets.join(",")}",
+          args: buildArgs,
           env: env,
         );
         return;

@@ -25,6 +25,9 @@ jobs:
           - platform: android
             os: ubuntu-24.04
             arch: arm
+          - platform: android
+            os: ubuntu-24.04
+            arch: universal
           - platform: windows
             os: windows-2025
             arch: amd64
