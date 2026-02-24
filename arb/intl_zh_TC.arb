@@ -257,6 +257,8 @@
   "delay": "延遲",
   "style": "風格",
   "size": "尺寸",
+  "delayAnimation": "延遲動畫",
+  "noAnimation": "無動畫",
   "sort": "排序",
   "columns": "列數",
   "proxiesSetting": "代理設定",

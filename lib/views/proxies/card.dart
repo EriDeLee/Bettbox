@@ -7,6 +7,7 @@ import 'package:bett_box/views/proxies/common.dart';
 import 'package:bett_box/widgets/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 
 class ProxyCard extends StatelessWidget {
   final String groupName;
@@ -175,7 +176,7 @@ class _ProxyNameText extends StatelessWidget {
 }
 
 // Extract delay text component
-class _ProxyDelayText extends StatelessWidget {
+class _ProxyDelayText extends ConsumerWidget {
   final Proxy proxy;
   final String? testUrl;
 
@@ -185,9 +186,40 @@ class _ProxyDelayText extends StatelessWidget {
     proxyDelayTest(proxy, testUrl);
   }
 
+  Widget _buildDelayAnimation(
+    DelayAnimationType type,
+    double size,
+    Color color,
+  ) {
+    return switch (type) {
+      DelayAnimationType.none => Icon(Icons.bolt, size: size),
+      DelayAnimationType.rotatingCircle =>
+        SpinKitRotatingCircle(color: color, size: size),
+      DelayAnimationType.pulse => SpinKitPulse(color: color, size: size),
+      DelayAnimationType.spinningLines =>
+        SpinKitSpinningLines(color: color, size: size),
+      DelayAnimationType.threeInOut =>
+        SpinKitThreeInOut(color: color, size: size),
+      DelayAnimationType.threeBounce =>
+        SpinKitThreeBounce(color: color, size: size),
+      DelayAnimationType.circle => SpinKitCircle(color: color, size: size),
+      DelayAnimationType.fadingCircle =>
+        SpinKitFadingCircle(color: color, size: size),
+      DelayAnimationType.fadingFour =>
+        SpinKitFadingFour(color: color, size: size),
+      DelayAnimationType.wave => SpinKitWave(color: color, size: size),
+      DelayAnimationType.doubleBounce =>
+        SpinKitDoubleBounce(color: color, size: size),
+    };
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final measure = globalState.measure;
+    final delayAnimation = ref.watch(
+      proxiesStyleSettingProvider.select((state) => state.delayAnimation),
+    );
+
     return SizedBox(
       height: measure.labelSmallHeight,
       child: Consumer(
@@ -199,12 +231,21 @@ class _ProxyDelayText extends StatelessWidget {
               ? SizedBox(
                   height: measure.labelSmallHeight,
                   width: measure.labelSmallHeight,
-                  child: IconButton(
-                    icon: const Icon(Icons.bolt),
-                    iconSize: measure.labelSmallHeight,
-                    padding: EdgeInsets.zero,
-                    onPressed: _handleTestCurrentDelay,
-                  ),
+                  child: delayAnimation == DelayAnimationType.none
+                      ? IconButton(
+                          icon: const Icon(Icons.bolt),
+                          iconSize: measure.labelSmallHeight,
+                          padding: EdgeInsets.zero,
+                          onPressed: _handleTestCurrentDelay,
+                        )
+                      : GestureDetector(
+                          onTap: _handleTestCurrentDelay,
+                          child: _buildDelayAnimation(
+                            delayAnimation,
+                            measure.labelSmallHeight,
+                            context.colorScheme.primary,
+                          ),
+                        ),
                 )
               : GestureDetector(
                   onTap: _handleTestCurrentDelay,

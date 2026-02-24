@@ -351,9 +351,18 @@ class _ListHeaderState extends State<ListHeader> {
 
   Future<void> _delayTest() async {
     if (isLock) return;
-    isLock = true;
-    await delayTest(widget.group.all, widget.group.testUrl);
-    isLock = false;
+    setState(() {
+      isLock = true;
+    });
+    try {
+      await delayTest(widget.group.all, widget.group.testUrl);
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLock = false;
+        });
+      }
+    }
   }
 
   void _handleChange(String groupName) {
@@ -519,7 +528,7 @@ class _ListHeaderState extends State<ListHeader> {
                     icon: const Icon(Icons.adjust),
                   ),
                   IconButton(
-                    onPressed: _delayTest,
+                    onPressed: isLock ? null : _delayTest,
                     visualDensity: VisualDensity.standard,
                     icon: const Icon(Icons.network_ping),
                   ),

@@ -1405,7 +1405,7 @@ return $default(_that.logLevel,_that.payload,_that.dateTime);case _:
 @JsonSerializable()
 
 class _Log implements Log {
-  const _Log({@JsonKey(name: 'LogLevel') this.logLevel = LogLevel.info, @JsonKey(name: 'Payload') this.payload = '', @JsonKey(fromJson: _logDateTime) required this.dateTime});
+  const _Log({@JsonKey(name: 'LogLevel') this.logLevel = LogLevel.error, @JsonKey(name: 'Payload') this.payload = '', @JsonKey(fromJson: _logDateTime) required this.dateTime});
   factory _Log.fromJson(Map<String, dynamic> json) => _$LogFromJson(json);
 
 // @JsonKey(fromJson: _logId) required String id,

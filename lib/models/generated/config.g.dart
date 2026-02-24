@@ -235,6 +235,12 @@ _ProxiesStyle _$ProxiesStyleFromJson(Map<String, dynamic> json) =>
       cardType:
           $enumDecodeNullable(_$ProxyCardTypeEnumMap, json['cardType']) ??
           ProxyCardType.shrink,
+      delayAnimation:
+          $enumDecodeNullable(
+            _$DelayAnimationTypeEnumMap,
+            json['delayAnimation'],
+          ) ??
+          DelayAnimationType.none,
       iconMap:
           (json['iconMap'] as Map<String, dynamic>?)?.map(
             (k, e) => MapEntry(k, e as String),
@@ -249,6 +255,7 @@ Map<String, dynamic> _$ProxiesStyleToJson(_ProxiesStyle instance) =>
       'layout': _$ProxiesLayoutEnumMap[instance.layout]!,
       'iconStyle': _$ProxiesIconStyleEnumMap[instance.iconStyle]!,
       'cardType': _$ProxyCardTypeEnumMap[instance.cardType]!,
+      'delayAnimation': _$DelayAnimationTypeEnumMap[instance.delayAnimation]!,
       'iconMap': instance.iconMap,
     };
 
@@ -276,6 +283,20 @@ const _$ProxyCardTypeEnumMap = {
   ProxyCardType.expand: 'expand',
   ProxyCardType.shrink: 'shrink',
   ProxyCardType.min: 'min',
+};
+
+const _$DelayAnimationTypeEnumMap = {
+  DelayAnimationType.none: 'none',
+  DelayAnimationType.rotatingCircle: 'rotatingCircle',
+  DelayAnimationType.pulse: 'pulse',
+  DelayAnimationType.spinningLines: 'spinningLines',
+  DelayAnimationType.threeInOut: 'threeInOut',
+  DelayAnimationType.threeBounce: 'threeBounce',
+  DelayAnimationType.circle: 'circle',
+  DelayAnimationType.fadingCircle: 'fadingCircle',
+  DelayAnimationType.fadingFour: 'fadingFour',
+  DelayAnimationType.wave: 'wave',
+  DelayAnimationType.doubleBounce: 'doubleBounce',
 };
 
 _TextScale _$TextScaleFromJson(Map<String, dynamic> json) => _TextScale(

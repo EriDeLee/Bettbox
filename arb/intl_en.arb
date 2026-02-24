@@ -257,6 +257,8 @@
   "delay": "Delay",
   "style": "Style",
   "size": "Size",
+  "delayAnimation": "Delay Animation",
+  "noAnimation": "No Animation",
   "sort": "Sort",
   "columns": "Columns",
   "proxiesSetting": "Proxy Settings",

@@ -2034,6 +2034,26 @@ class AppLocalizations {
     return Intl.message('Size', name: 'size', desc: '', args: []);
   }
 
+  /// `Delay Animation`
+  String get delayAnimation {
+    return Intl.message(
+      'Delay Animation',
+      name: 'delayAnimation',
+      desc: '',
+      args: [],
+    );
+  }
+
+  /// `No Animation`
+  String get noAnimation {
+    return Intl.message(
+      'No Animation',
+      name: 'noAnimation',
+      desc: '',
+      args: [],
+    );
+  }
+
   /// `Sort`
   String get sort {
     return Intl.message('Sort', name: 'sort', desc: '', args: []);

@@ -419,3 +419,17 @@ enum Language { yaml, javaScript }
 enum ImportOption { file, url }
 
 enum ScrollPositionCacheKeys { tools, profiles, proxiesList, proxiesTabList }
+
+enum DelayAnimationType {
+  none,
+  rotatingCircle,
+  pulse,
+  spinningLines,
+  threeInOut,
+  threeBounce,
+  circle,
+  fadingCircle,
+  fadingFour,
+  wave,
+  doubleBounce,
+}

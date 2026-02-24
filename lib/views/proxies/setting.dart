@@ -48,6 +48,22 @@ class ProxiesSetting extends StatelessWidget {
     };
   }
 
+  String _getTextForDelayAnimation(DelayAnimationType type) {
+    return switch (type) {
+      DelayAnimationType.none => appLocalizations.noAnimation,
+      DelayAnimationType.rotatingCircle => 'RotatingCircle',
+      DelayAnimationType.pulse => 'Pulse',
+      DelayAnimationType.spinningLines => 'SpinningLines',
+      DelayAnimationType.threeInOut => 'ThreeInOut',
+      DelayAnimationType.threeBounce => 'ThreeBounce',
+      DelayAnimationType.circle => 'Circle',
+      DelayAnimationType.fadingCircle => 'FadingCircle',
+      DelayAnimationType.fadingFour => 'FadingFour',
+      DelayAnimationType.wave => 'Wave',
+      DelayAnimationType.doubleBounce => 'DoubleBounce',
+    };
+  }
+
   List<Widget> _buildStyleSetting() {
     return generateSection(
       title: appLocalizations.style,
@@ -198,6 +214,44 @@ class ProxiesSetting extends StatelessWidget {
     );
   }
 
+  List<Widget> _buildDelayAnimationSetting() {
+    return generateSection(
+      title: appLocalizations.delayAnimation,
+      items: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          scrollDirection: Axis.horizontal,
+          child: Consumer(
+            builder: (_, ref, _) {
+              final delayAnimation = ref.watch(
+                proxiesStyleSettingProvider.select(
+                  (state) => state.delayAnimation,
+                ),
+              );
+              return Wrap(
+                spacing: 16,
+                children: [
+                  for (final item in DelayAnimationType.values)
+                    SettingTextCard(
+                      _getTextForDelayAnimation(item),
+                      isSelected: item == delayAnimation,
+                      onPressed: () {
+                        ref
+                            .read(proxiesStyleSettingProvider.notifier)
+                            .updateState((state) {
+                          return state.copyWith(delayAnimation: item);
+                        });
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   List<Widget> _buildGroupStyleSetting() {
     return generateSection(
       title: appLocalizations.iconStyle,
@@ -246,6 +300,7 @@ class ProxiesSetting extends StatelessWidget {
           ..._buildSortSetting(),
           ..._buildLayoutSetting(),
           ..._buildSizeSetting(),
+          ..._buildDelayAnimationSetting(),
           Consumer(
             builder: (_, ref, child) {
               final isList = ref.watch(
