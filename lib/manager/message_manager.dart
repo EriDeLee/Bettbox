@@ -18,7 +18,6 @@ class MessageManager extends StatefulWidget {
 class MessageManagerState extends State<MessageManager> {
   final _messagesNotifier = ValueNotifier<List<CommonMessage>>([]);
   final List<CommonMessage> _bufferMessages = [];
-  final Set<String> _actionHandlingIds = {};
   bool _pushing = false;
 
   @override
@@ -66,7 +65,7 @@ class MessageManagerState extends State<MessageManager> {
     }
   }
 
-  Future<void> _handleRemove(CommonMessage commonMessage) async {
+  void _handleRemove(CommonMessage commonMessage) {
     _messagesNotifier.value = List<CommonMessage>.from(_messagesNotifier.value)
       ..remove(commonMessage);
   }
@@ -113,15 +112,9 @@ class MessageManagerState extends State<MessageManager> {
                                     messages.last.onAction != null) ...[
                                   const SizedBox(width: 8),
                                   TextButton(
-                                    onPressed: () async {
+                                    onPressed: () {
                                       final message = messages.last;
-                                      if (_actionHandlingIds.contains(
-                                        message.id,
-                                      )) {
-                                        return;
-                                      }
-                                      _actionHandlingIds.add(message.id);
-                                      await _handleRemove(message);
+                                      _handleRemove(message);
                                       message.onAction?.call();
                                     },
                                     style: TextButton.styleFrom(
