@@ -21,10 +21,16 @@ class SmartAutoStopItem extends ConsumerWidget {
       subtitle: Text(appLocalizations.smartAutoStopDesc),
       delegate: SwitchDelegate(
         value: smartAutoStop,
-        onChanged: (bool value) {
+        onChanged: (bool value) async {
           ref
               .read(vpnSettingProvider.notifier)
               .updateState((state) => state.copyWith(smartAutoStop: value));
+
+          // Disable quick response native behavior when smart auto stop is enabled to prevent severe conflicts
+          if (system.isAndroid) {
+            final quickResponse = ref.read(vpnSettingProvider).quickResponse;
+            await service?.setQuickResponse(quickResponse && !value);
+          }
         },
       ),
     );
@@ -202,10 +208,11 @@ class QuickResponseItem extends ConsumerWidget {
           ref
               .read(vpnSettingProvider.notifier)
               .updateState((state) => state.copyWith(quickResponse: value));
-          
-          // Notify Android native code
+
+          // Notify Android native code, maintaining mutual exclusivity with smart auto stop
           if (system.isAndroid) {
-            await service?.setQuickResponse(value);
+            final smartAutoStop = ref.read(vpnSettingProvider).smartAutoStop;
+            await service?.setQuickResponse(value && !smartAutoStop);
           }
         },
       ),

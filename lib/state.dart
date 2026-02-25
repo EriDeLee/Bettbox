@@ -143,9 +143,11 @@ class GlobalState {
       final tunEnabled = config.patchClashConfig.tun.enable;
       await prefs?.setBool('is_tun_running', tunEnabled);
     }
-    // Android: sync quick response state
+    // Android: sync quick response state (disable if smartAutoStop is on to prevent conflicts)
     if (system.isAndroid) {
-      await service?.setQuickResponse(config.vpnProps.quickResponse);
+      final conflictFreeQuickResponse =
+          config.vpnProps.quickResponse && !config.vpnProps.smartAutoStop;
+      await service?.setQuickResponse(conflictFreeQuickResponse);
     }
     startUpdateTasks(tasks);
   }
