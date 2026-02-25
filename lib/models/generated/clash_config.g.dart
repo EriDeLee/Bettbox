@@ -174,7 +174,7 @@ _Tun _$TunFromJson(Map<String, dynamic> json) => _Tun(
       (json['dns-hijack'] as List<dynamic>?)
           ?.map((e) => e as String)
           .toList() ??
-      const ['any:53', 'tcp://any:53'],
+      const ['any:53'],
   routeAddress:
       (json['route-address'] as List<dynamic>?)
           ?.map((e) => e as String)
