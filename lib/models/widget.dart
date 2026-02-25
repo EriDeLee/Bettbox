@@ -14,6 +14,8 @@ abstract class CommonMessage with _$CommonMessage {
     required String id,
     required String text,
     @Default(Duration(seconds: 3)) Duration duration,
+    @Default(null) VoidCallback? onAction,
+    @Default(null) String? actionLabel,
   }) = _CommonMessage;
 }
 

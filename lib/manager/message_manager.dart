@@ -31,8 +31,13 @@ class MessageManagerState extends State<MessageManager> {
     super.dispose();
   }
 
-  Future<void> message(String text) async {
-    final commonMessage = CommonMessage(id: utils.uuidV4, text: text);
+  Future<void> message(String text, {VoidCallback? onAction, String? actionLabel}) async {
+    final commonMessage = CommonMessage(
+      id: utils.uuidV4,
+      text: text,
+      onAction: onAction,
+      actionLabel: actionLabel,
+    );
     _bufferMessages.add(commonMessage);
     await _showMessage();
   }
@@ -95,7 +100,28 @@ class MessageManagerState extends State<MessageManager> {
                               horizontal: 12,
                               vertical: 16,
                             ),
-                            child: Text(messages.last.text),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Expanded(
+                                  child: Text(messages.last.text),
+                                ),
+                                if (messages.last.actionLabel != null &&
+                                    messages.last.onAction != null) ...[
+                                  const SizedBox(width: 8),
+                                  TextButton(
+                                    onPressed: () {
+                                      messages.last.onAction?.call();
+                                    },
+                                    style: TextButton.styleFrom(
+                                      foregroundColor:
+                                          context.colorScheme.primary,
+                                    ),
+                                    child: Text(messages.last.actionLabel!),
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
                         );
                       },
