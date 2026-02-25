@@ -18,6 +18,7 @@ class MessageManager extends StatefulWidget {
 class MessageManagerState extends State<MessageManager> {
   final _messagesNotifier = ValueNotifier<List<CommonMessage>>([]);
   final List<CommonMessage> _bufferMessages = [];
+  final Set<String> _actionHandlingIds = {};
   bool _pushing = false;
 
   @override
@@ -31,7 +32,11 @@ class MessageManagerState extends State<MessageManager> {
     super.dispose();
   }
 
-  Future<void> message(String text, {VoidCallback? onAction, String? actionLabel}) async {
+  Future<void> message(
+    String text, {
+    VoidCallback? onAction,
+    String? actionLabel,
+  }) async {
     final commonMessage = CommonMessage(
       id: utils.uuidV4,
       text: text,
@@ -98,22 +103,36 @@ class MessageManagerState extends State<MessageManager> {
                             width: min(constraints.maxWidth, 500),
                             padding: EdgeInsets.symmetric(
                               horizontal: 12,
-                              vertical: 16,
+                              vertical: 12,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Expanded(
-                                  child: Text(messages.last.text),
-                                ),
+                                Expanded(child: Text(messages.last.text)),
                                 if (messages.last.actionLabel != null &&
                                     messages.last.onAction != null) ...[
                                   const SizedBox(width: 8),
                                   TextButton(
-                                    onPressed: () {
-                                      messages.last.onAction?.call();
+                                    onPressed: () async {
+                                      final message = messages.last;
+                                      if (_actionHandlingIds.contains(
+                                        message.id,
+                                      )) {
+                                        return;
+                                      }
+                                      _actionHandlingIds.add(message.id);
+                                      await _handleRemove(message);
+                                      message.onAction?.call();
                                     },
                                     style: TextButton.styleFrom(
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
                                       foregroundColor:
                                           context.colorScheme.primary,
                                     ),
