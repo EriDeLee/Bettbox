@@ -36,6 +36,11 @@ class MessageManagerState extends State<MessageManager> {
     VoidCallback? onAction,
     String? actionLabel,
   }) async {
+    if (_messagesNotifier.value.any((m) => m.text == text) ||
+        _bufferMessages.any((m) => m.text == text)) {
+      return;
+    }
+
     final commonMessage = CommonMessage(
       id: utils.uuidV4,
       text: text,
