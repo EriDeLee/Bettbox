@@ -389,20 +389,15 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
         GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState == RunState.START) {
-                // Service running, update notice
-                android.util.Log.d("VpnPlugin", "Service already running or reconnected, updating notification")
-                scope.launch {
-                    startForeground()
-                }
-                return
-            }
             val currentOptions = options
             if (currentOptions == null) {
                 android.util.Log.e("VpnPlugin", "Start service failed: options is null")
                 GlobalState.updateRunState(RunState.STOP)
                 return
             }
+
+            // Always attempt to re-establish the VPN if called, rather than skipping purely on state.
+            // This handles cases where state is START but the actual fd/TUN was destroyed.
             GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
             

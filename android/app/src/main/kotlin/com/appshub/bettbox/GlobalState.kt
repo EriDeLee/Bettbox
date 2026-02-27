@@ -100,27 +100,26 @@ object GlobalState {
 
     fun handleStart(skipDebounce: Boolean = false): Boolean {
         if (!skipDebounce && !acquireToggleSlot()) return false
-        if (currentRunState == RunState.STOP) {
-            updateRunState(RunState.PENDING)
-            runLock.lock()
-            try {
-                val tilePlugin = getCurrentTilePlugin()
-                if (tilePlugin != null) {
-                    tilePlugin.handleStart()
-                } else {
-                    initServiceEngine()
-                }
-            } finally {
-                runLock.unlock()
+        // Allow attempting start even if state is START, to recover from inconsistent states.
+        // It will transition to PENDING and then re-evaluate.
+        updateRunState(RunState.PENDING)
+        runLock.lock()
+        try {
+            val tilePlugin = getCurrentTilePlugin()
+            if (tilePlugin != null) {
+                tilePlugin.handleStart()
+            } else {
+                initServiceEngine()
             }
-            return true
+        } finally {
+            runLock.unlock()
         }
-        return false
+        return true
     }
 
     fun handleStop(skipDebounce: Boolean = false) {
         if (!skipDebounce && !acquireToggleSlot()) return
-        if (currentRunState == RunState.START) {
+        if (currentRunState == RunState.START || currentRunState == RunState.PENDING) {
             updateRunState(RunState.PENDING)
             runLock.lock()
             try {
