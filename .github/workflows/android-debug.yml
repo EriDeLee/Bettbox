@@ -38,6 +38,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.38.x'
           cache: true
 
       - name: Setup Cache
@@ -57,10 +58,18 @@ jobs:
           dart setup.dart android --arch universal --out core
           flutter build apk --debug --dart-define=APP_ENV=pre --dart-define=SENTRY_DSN=dummy_dsn
 
+      - name: Rename APK with timestamp
+        id: apk
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d%H%M%S')
+          mv build/app/outputs/flutter-apk/app-debug.apk "bettbox-debug-${TIMESTAMP}.apk"
+          echo "name=bettbox-debug-${TIMESTAMP}" >> $GITHUB_OUTPUT
+
       - name: Upload Debug APK
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
-          name: bettbox-debug-universal-${{ github.sha }}
-          path: build/app/outputs/flutter-apk/*.apk
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.name }}.apk
           retention-days: 1
+          archive: false
           if-no-files-found: error
