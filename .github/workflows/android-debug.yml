@@ -44,8 +44,8 @@ jobs:
       - name: Setup Pub Cache
         uses: actions/cache@v5
         with:
-          path: \~/.pub-cache
-          key: flutter-pub-\( {{ runner.os }}- \){{ hashFiles('pubspec.lock') }}
+          path: ~/.pub-cache
+          key: flutter-pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
           restore-keys: |
             flutter-pub-${{ runner.os }}-
 

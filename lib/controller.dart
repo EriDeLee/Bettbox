@@ -814,8 +814,9 @@ class AppController {
       final isVpnRunningFlag = prefs?.getBool('is_vpn_running') ?? false;
       final isAbnormalExit = !globalState.isStart && isVpnRunningFlag;
       if (isAbnormalExit) {
+        await prefs?.setBool('is_vpn_running', false);
         commonPrint.log(
-          'Abnormal exit detected (was running but core is dead)',
+          'Abnormal exit detected (was running but core is dead), resetting flag',
         );
         recoveryReason = 'Abnormal exit';
       }
@@ -846,8 +847,9 @@ class AppController {
       final wasTunRunning = prefs?.getBool('is_tun_running') ?? false;
       final isTunConflict = !globalState.isStart && wasTunRunning;
       if (isTunConflict) {
+        await prefs?.setBool('is_tun_running', false);
         commonPrint.log(
-          'Desktop TUN resource conflict detected (was running but core is dead)',
+          'Desktop TUN resource conflict detected (was running but core is dead), resetting flag',
         );
         needRecovery = true;
         recoveryReason = 'TUN resource conflict';
@@ -870,12 +872,19 @@ class AppController {
 
       // Recovery steps
       await globalState.handleStop();
-      await Future.delayed(const Duration(milliseconds: 750));
+      
+      // Longer wait for reinstall to let system settle
+      if (recoveryReason.contains('reinstall') || recoveryReason.contains('upgrade')) {
+        commonPrint.log('Post-update wait (3s)...');
+        await Future.delayed(const Duration(seconds: 3));
+      } else {
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
 
       if (autoRun) {
         commonPrint.log('Waiting for system stabilization...');
-        // Delay to simulate user "manual startup" timing
-        await Future.delayed(const Duration(milliseconds: 750));
+        // Additional delay for autorun
+        await Future.delayed(const Duration(milliseconds: 1000));
 
         commonPrint.log('Executing delayed AutoRun...');
         await updateStatus(true);

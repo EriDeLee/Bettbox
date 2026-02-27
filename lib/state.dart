@@ -139,6 +139,22 @@ class GlobalState {
     startTime ??= DateTime.now();
     await clashCore.startListener();
     await service?.startVpn();
+    
+    // Verify start on Android
+    if (system.isAndroid) {
+      Future.delayed(const Duration(seconds: 5), () async {
+        final prefs = await preferences.sharedPreferencesCompleter.future;
+        final isVpnRunningFlag = prefs?.getBool('is_vpn_running') ?? false;
+        
+        // If we think we started, but native says we are stopped
+        if (isStart && !isVpnRunningFlag) {
+           commonPrint.log('VPN start verification failed, resetting state');
+           startTime = null;
+           stopUpdateTasks();
+        }
+      });
+    }
+
     final prefs = await preferences.sharedPreferencesCompleter.future;
     await prefs?.setBool('is_vpn_running', true);
     // Desktop: record TUN running state (detect resource conflicts after update)

@@ -706,11 +706,23 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
 
     fun requestVpnPermission(callBack: () -> Unit) {
         vpnCallBack = callBack
-        val intent = VpnService.prepare(BettboxApplication.getAppContext())
+        val context = BettboxApplication.getAppContext()
+        val intent = VpnService.prepare(context)
+        
         if (intent != null) {
-            activityRef?.get()?.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
+            val activity = activityRef?.get()
+            if (activity == null) {
+                android.util.Log.e("AppPlugin", "requestVpnPermission failed: activity is null")
+                // Try to start activity from context? No, it needs startActivityForResult
+                // If activity is null, we can't show the permission dialog.
+                // This might happen if the engine started without an activity.
+                return
+            }
+            android.util.Log.d("AppPlugin", "requestVpnPermission: starting activity for result")
+            activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
             return
         }
+        android.util.Log.d("AppPlugin", "requestVpnPermission: already prepared or not needed")
         vpnCallBack?.invoke()
     }
 

@@ -202,8 +202,24 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun handleStartVpn() {
-        GlobalState.getCurrentAppPlugin()?.requestVpnPermission {
+        val plugin = GlobalState.getCurrentAppPlugin()
+        if (plugin == null) {
+            android.util.Log.e("VpnPlugin", "handleStartVpn: AppPlugin is null")
+            GlobalState.updateRunState(RunState.STOP)
+            return
+        }
+        
+        plugin.requestVpnPermission {
             handleStartService()
+        }
+        
+        // Safety check: if after 5 seconds still PENDING, reset to STOP
+        scope.launch {
+            delay(5000)
+            if (GlobalState.currentRunState == RunState.PENDING) {
+                android.util.Log.w("VpnPlugin", "VPN start timed out in PENDING state, resetting to STOP")
+                GlobalState.updateRunState(RunState.STOP)
+            }
         }
     }
 
