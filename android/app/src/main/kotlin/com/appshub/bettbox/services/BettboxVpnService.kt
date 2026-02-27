@@ -135,6 +135,12 @@ class BettboxVpnService : VpnService(), BaseServiceInterface {
         }
     }
 
+    override fun onRevoke() {
+        Log.i("BettboxVpnService", "VPN revoked by system")
+        VpnPlugin.handleStop()
+        super.onRevoke()
+    }
+
     private var cachedBuilder: NotificationCompat.Builder? = null
 
     fun resetNotificationBuilder() {

@@ -368,13 +368,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private fun handleStartService() {
         if (bettBoxService == null) {
+            android.util.Log.d("VpnPlugin", "bettBoxService is null, binding service...")
             bindService()
             return
         }
         GlobalState.runLock.withLock {
             if (GlobalState.currentRunState == RunState.START) {
                 // Service running, update notice
-                android.util.Log.d("VpnPlugin", "Service reconnected, updating notification")
+                android.util.Log.d("VpnPlugin", "Service already running or reconnected, updating notification")
                 scope.launch {
                     startForeground()
                 }
@@ -388,21 +389,35 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
-            val fd = bettBoxService?.start(currentOptions)
-            Core.startTun(
-                fd = fd ?: 0,
-                protect = this::protect,
-                resolverProcess = this::resolverProcess,
-            )
-            // Update notice on start
-            scope.launch {
-                startForeground()
-            }
-            // Install SuspendModule if dozeSuspend is enabled
-            if (options?.dozeSuspend == true) {
-                suspendModule?.uninstall()
-                suspendModule = SuspendModule(BettboxApplication.getAppContext())
-                suspendModule?.install()
+            
+            try {
+                android.util.Log.d("VpnPlugin", "Starting VPN service with options...")
+                val fd = bettBoxService?.start(currentOptions)
+                if (fd == null || fd == 0) {
+                    android.util.Log.e("VpnPlugin", "Failed to start VPN: fd is null or 0")
+                    GlobalState.updateRunState(RunState.STOP)
+                    return
+                }
+                
+                android.util.Log.d("VpnPlugin", "VPN service started, FD: $fd. Starting Go TUN...")
+                Core.startTun(
+                    fd = fd,
+                    protect = this::protect,
+                    resolverProcess = this::resolverProcess,
+                )
+                // Update notice on start
+                scope.launch {
+                    startForeground()
+                }
+                // Install SuspendModule if dozeSuspend is enabled
+                if (currentOptions.dozeSuspend == true) {
+                    suspendModule?.uninstall()
+                    suspendModule = SuspendModule(BettboxApplication.getAppContext())
+                    suspendModule?.install()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("VpnPlugin", "Exception during VPN start: ${e.message}", e)
+                GlobalState.updateRunState(RunState.STOP)
             }
         }
     }

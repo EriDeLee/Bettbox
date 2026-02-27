@@ -17,6 +17,9 @@ class BootReceiver : BroadcastReceiver() {
         private const val TAG = "BootReceiver"
         private const val PREFS_NAME = "FlutterSharedPreferences"
         private const val AUTO_LAUNCH_KEY = "flutter.autoLaunch"
+        
+        private const val KEY_VPN_RUNNING = "flutter.is_vpn_running"
+        private const val KEY_TUN_RUNNING = "flutter.is_tun_running"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -27,10 +30,17 @@ class BootReceiver : BroadcastReceiver() {
         Log.d(TAG, "Device boot completed, checking autoLaunch setting")
 
         try {
-            // Read autoLaunch setting from SharedPreferences
+            // Read settings from SharedPreferences
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            
+            // Clear VPN running flags on boot to ensure a clean state
+            Log.i(TAG, "Clearing VPN running state flags on boot")
+            prefs.edit()
+                .putBoolean(KEY_VPN_RUNNING, false)
+                .putBoolean(KEY_TUN_RUNNING, false)
+                .apply()
+            
             val autoLaunch = prefs.getBoolean(AUTO_LAUNCH_KEY, false)
-
             Log.d(TAG, "AutoLaunch setting: $autoLaunch")
 
             if (autoLaunch) {
