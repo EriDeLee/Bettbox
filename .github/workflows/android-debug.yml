@@ -41,20 +41,19 @@ jobs:
           flutter-version: '3.38.x'
           cache: true
 
-      - name: Setup Cache
+      - name: Setup Pub Cache
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.pub-cache
-            .dart_tool/build
-          key: flutter-deps-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          path: \~/.pub-cache
+          key: flutter-pub-\( {{ runner.os }}- \){{ hashFiles('pubspec.lock') }}
           restore-keys: |
-            flutter-deps-${{ runner.os }}-
+            flutter-pub-${{ runner.os }}-
 
       - name: Build Debug APK
         run: |
           flutter pub get
-          dart run build_runner build -d
+          rm -rf .dart_tool/build
+          dart run build_runner build --delete-conflicting-outputs
           dart setup.dart android --arch universal --out core
           flutter build apk --debug --dart-define=APP_ENV=pre --dart-define=SENTRY_DSN=dummy_dsn
 
