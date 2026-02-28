@@ -25,9 +25,7 @@ enum class RunState {
 
 
 object GlobalState {
-    companion object {
-        private const val TAG = "GlobalState"
-    }
+    private const val TAG = "GlobalState"
     
     val runLock = ReentrantLock()
 

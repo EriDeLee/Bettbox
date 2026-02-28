@@ -1,7 +1,6 @@
 package com.appshub.bettbox.util
 
 import android.util.Log
-import com.appshub.bettbox.BuildConfig
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,7 +35,7 @@ enum class LogLevel(val priority: Int) {
 
 /**
  * 统一日志工具类
- * 
+ *
  * 功能：
  * 1. 统一的日志格式
  * 2. 可配置的日志级别
@@ -47,7 +46,11 @@ enum class LogLevel(val priority: Int) {
 object LogUtils {
     // 全局日志级别，发布版本默认为 INFO
     @Volatile
-    var minLogLevel: LogLevel = if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.INFO
+    var minLogLevel: LogLevel = LogLevel.DEBUG  // 默认使用 DEBUG，可通过外部设置
+    
+    // 是否为 debug 模式（通过外部设置）
+    @Volatile
+    var isDebugMode: Boolean = true
     
     // 启用的模块（空表示启用所有）
     @Volatile
@@ -161,24 +164,32 @@ object LogUtils {
     }
     
     // ========== 便捷方法 ==========
-    
+
     fun v(module: LogModule, message: String) {
         log(module, LogLevel.VERBOSE, message)
     }
-    
+
     fun d(module: LogModule, message: String) {
         log(module, LogLevel.DEBUG, message)
     }
-    
+
     fun i(module: LogModule, message: String) {
         log(module, LogLevel.INFO, message)
     }
-    
+
     fun w(module: LogModule, message: String) {
         log(module, LogLevel.WARN, message)
     }
     
+    fun w(module: LogModule, message: String, throwable: Throwable?) {
+        log(module, LogLevel.WARN, message, throwable)
+    }
+
     fun e(module: LogModule, message: String, throwable: Throwable? = null) {
+        log(module, LogLevel.ERROR, message, throwable)
+    }
+    
+    fun e(module: LogModule, throwable: Throwable, message: String = throwable.message ?: "Unknown error") {
         log(module, LogLevel.ERROR, message, throwable)
     }
     
