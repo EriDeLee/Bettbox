@@ -149,7 +149,7 @@ class DeveloperView extends ConsumerWidget {
         ListItem(
           title: Text('内核连接测试'),
           subtitle: Text('诊断内核连接问题，检查各项功能是否正常'),
-          trailing: Icon(Icons.stethoscope_outlined),
+          trailing: Icon(Icons.bug_report_outlined),
           onTap: () {
             _testCoreConnection(context, ref);
           },

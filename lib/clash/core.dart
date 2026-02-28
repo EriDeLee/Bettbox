@@ -121,16 +121,15 @@ class ClashCore {
     return result;
   }
 
-  FutureOr<String> validateConfig(String data) {
+  FutureOr<String> validateConfig(String data) async {
     commonPrint.debug('Validating config...', module: LogModule.config);
-    return clashInterface.validateConfig(data).then((result) {
-      if (result.isNotEmpty) {
-        commonPrint.error('Config validation failed: $result', module: LogModule.config);
-      } else {
-        commonPrint.debug('Config validation passed', module: LogModule.config);
-      }
-      return result;
-    });
+    final result = await clashInterface.validateConfig(data);
+    if (result.isNotEmpty) {
+      commonPrint.error('Config validation failed: $result', module: LogModule.config);
+    } else {
+      commonPrint.debug('Config validation passed', module: LogModule.config);
+    }
+    return result;
   }
 
   Future<String> updateConfig(UpdateParams updateParams) async {
@@ -264,7 +263,7 @@ class ClashCore {
   }
 
   Future<String> updateGeoData(UpdateGeoDataParams params) {
-    commonPrint.info('Updating Geo data: ${params.type}', module: LogModule.core);
+    commonPrint.info('Updating Geo data: ${params.geoType}', module: LogModule.core);
     return clashInterface.updateGeoData(params);
   }
 
