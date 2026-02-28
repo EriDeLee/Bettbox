@@ -73,8 +73,11 @@ class GlobalState {
   }
 
   Future<void> initApp(int version) async {
+    commonPrint.info('=== Initializing GlobalState ===', module: LogModule.app);
+    commonPrint.debug('Setting coreSHA256 and isPre flags', module: LogModule.app);
     coreSHA256 = const String.fromEnvironment('CORE_SHA256');
     isPre = const String.fromEnvironment('APP_ENV') != 'stable';
+    commonPrint.debug('Creating AppState with version: $version', module: LogModule.app);
     appState = AppState(
       brightness: WidgetsBinding.instance.platformDispatcher.platformBrightness,
       version: version,
@@ -85,28 +88,44 @@ class GlobalState {
       totalTraffic: Traffic(),
       systemUiOverlayStyle: const SystemUiOverlayStyle(),
     );
+    commonPrint.debug('Initializing dynamic color', module: LogModule.app);
     await _initDynamicColor();
+    commonPrint.debug('Calling init()', module: LogModule.app);
     await init();
+    commonPrint.info('=== GlobalState Initialization Completed ===', module: LogModule.app);
   }
 
   Future<void> _initDynamicColor() async {
+    commonPrint.verbose('Fetching dynamic color info', module: LogModule.ui);
     try {
       corePalette = await DynamicColorPlugin.getCorePalette();
       accentColor =
           await DynamicColorPlugin.getAccentColor() ??
           Color(defaultPrimaryColor);
-    } catch (_) {}
+      commonPrint.debug('Dynamic color initialized', module: LogModule.ui);
+    } catch (e) {
+      commonPrint.warning('Dynamic color initialization failed: $e', module: LogModule.ui);
+    }
   }
 
   Future<void> init() async {
+    commonPrint.info('Initializing GlobalState core data...', module: LogModule.app);
+    commonPrint.verbose('Fetching package info', module: LogModule.app);
     packageInfo = await PackageInfo.fromPlatform();
+    commonPrint.debug('Package info: ${packageInfo.version}+${packageInfo.buildNumber}', module: LogModule.app);
+    commonPrint.verbose('Loading config from preferences', module: LogModule.app);
     config =
         await preferences.getConfig() ?? Config(themeProps: defaultThemeProps);
+    commonPrint.debug('Config loaded', module: LogModule.app);
+    commonPrint.verbose('Migrating old data', module: LogModule.app);
     await globalState.migrateOldData(config);
+    commonPrint.verbose('Loading localizations', module: LogModule.app);
     await AppLocalizations.load(
       utils.getLocaleForString(config.appSetting.locale) ??
           WidgetsBinding.instance.platformDispatcher.locale,
     );
+    commonPrint.debug('Localization loaded', module: LogModule.app);
+    commonPrint.info('=== GlobalState Core Data Initialization Completed ===', module: LogModule.app);
   }
 
   String get ua => config.patchClashConfig.globalUa ?? packageInfo.ua;

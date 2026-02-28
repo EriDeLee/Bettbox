@@ -80,49 +80,66 @@ class AppController {
   }
 
   Future<void> restartCore() async {
-    commonPrint.log('restart core');
+    commonPrint.info('=== Restarting Core ===', module: LogModule.core);
+    commonPrint.debug('Step 1: Calling clashService.reStart()', module: LogModule.core);
     await clashService?.reStart();
+    commonPrint.debug('Step 2: Calling _initCore()', module: LogModule.core);
     await _initCore();
+    commonPrint.debug('Step 3: Checking if runtime is started', module: LogModule.core);
     if (_ref.read(runTimeProvider.notifier).isStart) {
+      commonPrint.info('Runtime is started, calling globalState.handleStart()', module: LogModule.core);
       await globalState.handleStart();
     }
+    commonPrint.info('=== Core Restart Completed ===', module: LogModule.core);
   }
 
   Future<void> updateStatus(bool isStart) async {
+    commonPrint.info('=== Updating Status: isStart=$isStart ===', module: LogModule.core);
     if (isStart) {
+      commonPrint.debug('Starting quick start process', module: LogModule.core);
       // Quick start
       await _fastStart();
 
       // Lazy load
       // Note: desktop TUN mode needs delay to avoid races
     } else {
+      commonPrint.debug('Stopping services', module: LogModule.core);
       await globalState.handleStop();
       clashCore.resetTraffic();
       _ref.read(trafficsProvider.notifier).clear();
       _ref.read(totalTrafficProvider.notifier).value = Traffic();
       _ref.read(runTimeProvider.notifier).value = null;
       addCheckIpNumDebounce();
+      commonPrint.info('=== Status Update Completed (Stop) ===', module: LogModule.core);
     }
   }
 
   /// Fast start: only execute essential startup operations
   Future<void> _fastStart() async {
+    commonPrint.info('=== Fast Start ===', module: LogModule.core);
     final patchConfig = _ref.read(patchClashConfigProvider);
     final isDesktop = system.isDesktop;
+    commonPrint.debug('Config: TUN=${patchConfig.tun.enable}, isDesktop=$isDesktop', module: LogModule.core);
 
     // Desktop TUN optimization
     if (isDesktop && patchConfig.tun.enable) {
+      commonPrint.debug('Desktop TUN mode: disabling TUN initially', module: LogModule.core);
       // Disable TUN
       await _quickSetupConfig(enableTun: false);
 
       // Update UI
+      commonPrint.debug('Calling globalState.handleStart()', module: LogModule.core);
       await globalState.handleStart([updateRunTime, updateTraffic]);
 
       // Delay TUN enabling
       Future.microtask(() async {
+        commonPrint.debug('Microtask: Requesting admin for TUN', module: LogModule.core);
         final res = await _requestAdmin(true);
         if (!res.isError) {
+          commonPrint.debug('Admin granted, updating Clash config', module: LogModule.core);
           await _updateClashConfig();
+        } else {
+          commonPrint.warning('Admin request failed: ${res.message}', module: LogModule.core);
         }
         // Lazy load
         _backgroundLoad();
@@ -130,41 +147,55 @@ class AppController {
 
       // Delayed IP check
       Future.delayed(const Duration(seconds: 2), () {
+        commonPrint.debug('Delayed IP check', module: LogModule.core);
         addCheckIpNumDebounce();
       });
+      commonPrint.info('=== Fast Start Completed (Desktop TUN) ===', module: LogModule.core);
       return;
     }
 
+    commonPrint.debug('Standard start mode', module: LogModule.core);
     await globalState.handleStart([updateRunTime, updateTraffic]);
 
     // Check config status
+    commonPrint.debug('Checking if config needs reapply', module: LogModule.core);
     final needReapply = await _checkIfNeedReapply();
     if (needReapply) {
+      commonPrint.debug('Config needs reapply, calling _quickSetupConfig()', module: LogModule.core);
       // Quick apply
       await _quickSetupConfig();
+    } else {
+      commonPrint.debug('Config unchanged, skipping reapply', module: LogModule.core);
     }
 
     // Delayed IP check
     Future.delayed(const Duration(seconds: 2), () {
+      commonPrint.debug('Delayed IP check', module: LogModule.core);
       addCheckIpNumDebounce();
     });
 
     // Non-TUN mode or mobile, load background data immediately
+    commonPrint.debug('Loading background data', module: LogModule.core);
     _backgroundLoad();
+    commonPrint.info('=== Fast Start Completed ===', module: LogModule.core);
   }
 
   /// Async data load
   void _backgroundLoad() {
+    commonPrint.verbose('Starting background load', module: LogModule.core);
     Future.microtask(() async {
       try {
         // Fetch data
+        commonPrint.debug('Fetching groups and providers', module: LogModule.core);
         await Future.wait([updateGroups(), updateProviders()]);
 
         // Delayed GC
+        commonPrint.debug('Scheduling delayed GC', module: LogModule.core);
         await Future.delayed(const Duration(seconds: 2));
         await clashCore.requestGc();
+        commonPrint.debug('Background load completed', module: LogModule.core);
       } catch (e) {
-        commonPrint.log('Background load error: $e');
+        commonPrint.error('Background load error: $e', module: LogModule.core);
       }
     });
   }
@@ -688,12 +719,22 @@ class AppController {
   }
 
   Future<void> _initCore() async {
+    commonPrint.info('=== Initializing Core ===', module: LogModule.core);
+    commonPrint.debug('Step 1: Checking if core is initialized', module: LogModule.core);
     final isInit = await clashCore.isInit;
+    commonPrint.debug('Core initialization status: $isInit', module: LogModule.core);
     if (!isInit) {
+      commonPrint.warning('Core not initialized, calling clashCore.init()', module: LogModule.core);
       await clashCore.init();
+      commonPrint.debug('Setting core state', module: LogModule.core);
       await clashCore.setState(globalState.getCoreState());
+      commonPrint.info('Core initialized and state set', module: LogModule.core);
+    } else {
+      commonPrint.debug('Core already initialized, skipping init', module: LogModule.core);
     }
+    commonPrint.debug('Step 2: Applying profile', module: LogModule.core);
     await applyProfile();
+    commonPrint.info('=== Core Initialization Completed ===', module: LogModule.core);
   }
 
   void startWakelockAutoRecovery() {

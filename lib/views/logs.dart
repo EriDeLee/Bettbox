@@ -20,6 +20,11 @@ class _LogsViewState extends ConsumerState<LogsView> {
   late ScrollController _scrollController;
 
   List<Log> _logs = [];
+  
+  // 调试模式状态
+  bool _debugMode = false;
+  LogLevel _minLogLevel = LogLevel.verbose;
+  Set<LogModule> _enabledModules = {};
 
   @override
   void initState() {
@@ -29,6 +34,12 @@ class _LogsViewState extends ConsumerState<LogsView> {
       initialScrollOffset: _logs.length * LogItem.height,
     );
     _logsStateNotifier.value = _logsStateNotifier.value.copyWith(logs: _logs);
+    
+    // 初始化调试配置
+    _debugMode = DebugConfig.verboseMode;
+    _minLogLevel = DebugConfig.minLogLevel;
+    _enabledModules = Set.from(DebugConfig.enabledModules);
+    
     ref.listenManual(logsProvider.select((state) => state.list), (prev, next) {
       if (prev != next) {
         final isEquality = logListEquality.equals(prev, next);
@@ -42,6 +53,21 @@ class _LogsViewState extends ConsumerState<LogsView> {
 
   List<Widget> _buildActions() {
     return [
+      // 调试模式开关
+      IconButton(
+        onPressed: _toggleDebugMode,
+        icon: Icon(
+          _debugMode ? Icons.bug_report : Icons.bug_report_outlined,
+          color: _debugMode ? context.colorScheme.primary : null,
+        ),
+        tooltip: '调试模式',
+      ),
+      // 日志级别过滤
+      IconButton(
+        onPressed: _handleLogLevelSettings,
+        icon: const Icon(Icons.filter_list_outlined),
+        tooltip: '日志级别过滤',
+      ),
       ValueListenableBuilder(
         valueListenable: _logsStateNotifier,
         builder: (_, state, _) {
@@ -74,31 +100,45 @@ class _LogsViewState extends ConsumerState<LogsView> {
     ];
   }
 
+  void _toggleDebugMode() {
+    setState(() {
+      _debugMode = !_debugMode;
+      DebugConfig.verboseMode = _debugMode;
+    });
+    commonPrint.info('调试模式已${_debugMode ? '开启' : '关闭'}', module: LogModule.app);
+  }
+
   void _handleClearLogs() {
     ref.read(logsProvider.notifier).clearLogs();
   }
 
   Future<void> _handleLogLevelSettings() async {
-    final currentLogLevel = ref.read(
-      patchClashConfigProvider.select((state) => state.logLevel),
-    );
-
-    final selectedLogLevel = await globalState.showCommonDialog<LogLevel>(
+    final selectedLevel = await globalState.showCommonDialog<LogLevel>(
       child: OptionsDialog<LogLevel>(
-        title: appLocalizations.logLevel,
+        title: '日志级别过滤',
         options: LogLevel.values,
-        value: currentLogLevel,
-        textBuilder: (logLevel) => logLevel.name,
+        value: _minLogLevel,
+        textBuilder: (logLevel) => '${logLevel.displayName} - ${_getLevelDesc(logLevel)}',
       ),
     );
 
-    if (selectedLogLevel != null && selectedLogLevel != currentLogLevel) {
-      ref
-          .read(patchClashConfigProvider.notifier)
-          .updateState((state) => state.copyWith(logLevel: selectedLogLevel));
-      // Sync config to core immediately
-      globalState.appController.updateClashConfigDebounce();
+    if (selectedLevel != null && selectedLevel != _minLogLevel) {
+      setState(() {
+        _minLogLevel = selectedLevel;
+        DebugConfig.minLogLevel = selectedLevel;
+      });
     }
+  }
+
+  String _getLevelDesc(LogLevel level) {
+    return switch (level) {
+      LogLevel.verbose => '最详细',
+      LogLevel.debug => '调试信息',
+      LogLevel.info => '一般信息',
+      LogLevel.warning => '警告',
+      LogLevel.error => '错误',
+      LogLevel.silent => '静默',
+    };
   }
 
   void _onSearch(String value) {
@@ -244,8 +284,20 @@ class LogItem extends StatelessWidget {
 
   const LogItem({super.key, required this.log, this.onClick});
 
+  /// 从日志 payload 中提取模块标签
+  String? _extractModule(String payload) {
+    // 格式：[MODULE][LEVEL] message
+    final moduleMatch = RegExp(r'\[([A-Z]+)\]\[([A-Z]+)\]').firstMatch(payload);
+    if (moduleMatch != null) {
+      return moduleMatch.group(1);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final module = _extractModule(log.payload);
+    
     return ListItem(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       onTap: () {
@@ -268,12 +320,35 @@ class LogItem extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              CommonChip(
-                onPressed: () {
-                  if (onClick == null) return;
-                  onClick!(log.logLevel.name);
-                },
-                label: log.logLevel.name,
+              Row(
+                children: [
+                  // 模块标签
+                  if (module != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _getModuleColor(module, context),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        module,
+                        style: context.textTheme.labelSmall?.copyWith(
+                          color: context.colorScheme.onPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  // 日志级别标签
+                  CommonChip(
+                    onPressed: () {
+                      if (onClick == null) return;
+                      onClick!(log.logLevel.name);
+                    },
+                    label: log.logLevel.displayName,
+                  ),
+                ],
               ),
               Text(
                 log.dateTime,
@@ -286,6 +361,21 @@ class LogItem extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Color _getModuleColor(String module, BuildContext context) {
+    return switch (module) {
+      'CORE' => context.colorScheme.primary,
+      'LISTENER' => context.colorScheme.secondary,
+      'CONFIG' => context.colorScheme.tertiary,
+      'CONNECTION' => context.colorScheme.error,
+      'PROXY' => context.colorScheme.primaryContainer,
+      'TRAFFIC' => context.colorScheme.secondaryContainer,
+      'VPN' => context.colorScheme.tertiaryContainer,
+      'UI' => Colors.purple.shade300,
+      'FFI' => Colors.orange.shade300,
+      _ => context.colorScheme.surfaceContainerHighest,
+    };
   }
 }
 

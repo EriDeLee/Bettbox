@@ -89,17 +89,46 @@ enum IpClickBehavior { privacyProtection, manualRefresh, switchDomestic }
 
 enum ViewMode { mobile, laptop, desktop }
 
-enum LogLevel { debug, info, warning, error, silent }
+enum LogLevel { verbose, debug, info, warning, error, silent }
 
 extension LogLevelExt on LogLevel {
   Color? get color {
     return switch (this) {
       LogLevel.silent => Colors.grey.shade700,
+      LogLevel.verbose => Colors.grey.shade300,
       LogLevel.debug => Colors.grey.shade400,
       LogLevel.info => null,
       LogLevel.warning => const Color.fromARGB(230, 255, 166, 0),
       LogLevel.error => Colors.redAccent,
     };
+  }
+
+  String get displayName {
+    return switch (this) {
+      LogLevel.verbose => 'VERBOSE',
+      LogLevel.debug => 'DEBUG',
+      LogLevel.info => 'INFO',
+      LogLevel.warning => 'WARN',
+      LogLevel.error => 'ERROR',
+      LogLevel.silent => 'SILENT',
+    };
+  }
+
+  /// 日志级别优先级，数值越小优先级越高
+  int get priority {
+    return switch (this) {
+      LogLevel.verbose => 0,
+      LogLevel.debug => 1,
+      LogLevel.info => 2,
+      LogLevel.warning => 3,
+      LogLevel.error => 4,
+      LogLevel.silent => 5,
+    };
+  }
+
+  /// 是否应该显示（考虑当前日志级别设置）
+  bool shouldShow(LogLevel currentLevel) {
+    return priority >= currentLevel.priority;
   }
 }
 

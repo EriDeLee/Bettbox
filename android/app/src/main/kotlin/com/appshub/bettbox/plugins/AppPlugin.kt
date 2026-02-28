@@ -25,6 +25,8 @@ import com.appshub.bettbox.R
 import com.appshub.bettbox.extensions.awaitResult
 import com.appshub.bettbox.extensions.getActionIntent
 import com.appshub.bettbox.models.Package
+import com.appshub.bettbox.util.LogModule
+import com.appshub.bettbox.util.LogUtils
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -43,6 +45,10 @@ import java.lang.ref.WeakReference
 import java.util.zip.ZipFile
 
 class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
+
+    companion object {
+        private const val TAG = "AppPlugin"
+    }
 
     private var activityRef: WeakReference<Activity>? = null
 
@@ -257,19 +263,24 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     private var isBlockNotification: Boolean = false
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        LogUtils.i(LogModule.APP, "=== onAttachedToEngine ===")
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "app")
         channel.setMethodCallHandler(this)
+        LogUtils.d(LogModule.APP, "AppPlugin attached to engine")
     }
 
     private fun initShortcuts(label: String) {
+        LogUtils.d(LogModule.APP, "initShortcuts: label='$label'")
         // Select icon by theme
         val iconRes = if (isSystemInDarkMode()) {
+            LogUtils.v(LogModule.APP, "Using dark icon")
             R.mipmap.ic_launcher_round
         } else {
+            LogUtils.v(LogModule.APP, "Using light icon")
             R.mipmap.ic_launcher_round_light
         }
-        
+
         val shortcut = ShortcutInfoCompat.Builder(BettboxApplication.getAppContext(), "toggle")
             .setShortLabel(label)
             .setIcon(
@@ -284,29 +295,34 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             BettboxApplication.getAppContext(),
             listOf(shortcut)
         )
+        LogUtils.i(LogModule.APP, "Shortcuts initialized")
     }
-    
+
     /**
      * Check dark mode
      */
     private fun isSystemInDarkMode(): Boolean {
-        val nightModeFlags = BettboxApplication.getAppContext().resources.configuration.uiMode and 
+        val nightModeFlags = BettboxApplication.getAppContext().resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK
         return nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        LogUtils.i(LogModule.APP, "=== onDetachedFromEngine ===")
         channel.setMethodCallHandler(null)
         scope.cancel()
+        LogUtils.d(LogModule.APP, "AppPlugin detached from engine")
     }
 
     private fun tip(message: String?) {
         if (GlobalState.flutterEngine == null) {
+            LogUtils.v(LogModule.APP, "tip: $message")
             Toast.makeText(BettboxApplication.getAppContext(), message, Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
+        LogUtils.v(LogModule.APP, "onMethodCall: ${call.method}")
         when (call.method) {
             "moveTaskToBack" -> {
                 activityRef?.get()?.moveTaskToBack(true)
@@ -705,24 +721,25 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
     }
 
     fun requestVpnPermission(callBack: () -> Unit) {
+        LogUtils.i(LogModule.APP, "=== requestVpnPermission ===")
         vpnCallBack = callBack
         val context = BettboxApplication.getAppContext()
         val intent = VpnService.prepare(context)
-        
+
         if (intent != null) {
             val activity = activityRef?.get()
             if (activity == null) {
-                android.util.Log.e("AppPlugin", "requestVpnPermission failed: activity is null")
+                LogUtils.e(LogModule.APP, "requestVpnPermission failed: activity is null")
                 // Try to start activity from context? No, it needs startActivityForResult
                 // If activity is null, we can't show the permission dialog.
                 // This might happen if the engine started without an activity.
                 return
             }
-            android.util.Log.d("AppPlugin", "requestVpnPermission: starting activity for result")
+            LogUtils.d(LogModule.APP, "requestVpnPermission: starting activity for result")
             activity.startActivityForResult(intent, VPN_PERMISSION_REQUEST_CODE)
             return
         }
-        android.util.Log.d("AppPlugin", "requestVpnPermission: already prepared or not needed")
+        LogUtils.d(LogModule.APP, "requestVpnPermission: already prepared or not needed")
         vpnCallBack?.invoke()
     }
 

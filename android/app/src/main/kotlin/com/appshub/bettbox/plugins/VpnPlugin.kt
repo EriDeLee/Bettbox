@@ -23,6 +23,8 @@ import com.appshub.bettbox.modules.SuspendModule
 import com.appshub.bettbox.services.BaseServiceInterface
 import com.appshub.bettbox.services.BettboxService
 import com.appshub.bettbox.services.BettboxVpnService
+import com.appshub.bettbox.util.LogModule
+import com.appshub.bettbox.util.LogUtils
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -47,7 +49,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var lastStartForegroundParams: StartForegroundParams? = null
     private val uidPageNameMap = mutableMapOf<Int, String>()
     private var suspendModule: SuspendModule? = null
-    
+
     // Quick Response: Network change debounce
     private var quickResponseEnabled = false
     private var disconnectCount = 0
@@ -62,72 +64,93 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            LogUtils.i(LogModule.VPN, "=== onServiceConnected ===")
             isBind = true
             bettBoxService = when (service) {
-                is BettboxVpnService.LocalBinder -> service.getService()
-                is BettboxService.LocalBinder -> service.getService()
+                is BettboxVpnService.LocalBinder -> {
+                    LogUtils.d(LogModule.VPN, "Connected to BettboxVpnService")
+                    service.getService()
+                }
+                is BettboxService.LocalBinder -> {
+                    LogUtils.d(LogModule.VPN, "Connected to BettboxService")
+                    service.getService()
+                }
                 else -> throw Exception("invalid binder")
             }
             handleStartService()
         }
 
         override fun onServiceDisconnected(arg: ComponentName) {
+            LogUtils.w(LogModule.VPN, "=== onServiceDisconnected ===")
             isBind = false
             bettBoxService = null
         }
     }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        LogUtils.i(LogModule.VPN, "=== onAttachedToEngine ===")
         scope = CoroutineScope(Dispatchers.Default)
         scope.launch {
+            LogUtils.d(LogModule.VPN, "Registering network callback")
             registerNetworkCallback()
         }
         flutterMethodChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "vpn")
         flutterMethodChannel.setMethodCallHandler(this)
-        
+
         // Rebind if VPN running but connection lost
         if (GlobalState.currentRunState == RunState.START && bettBoxService == null) {
-            android.util.Log.d("VpnPlugin", "VPN is running but service connection lost, rebinding...")
+            LogUtils.w(LogModule.VPN, "VPN is running but service connection lost, rebinding...")
             // Rebind with saved options
             if (options != null) {
+                LogUtils.d(LogModule.VPN, "Rebinding service with saved options")
                 bindService()
+            } else {
+                LogUtils.e(LogModule.VPN, "Cannot rebind: options is null")
             }
         }
     }
 
     override fun onDetachedFromEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        LogUtils.i(LogModule.VPN, "=== onDetachedFromEngine ===")
         unRegisterNetworkCallback()
         flutterMethodChannel.setMethodCallHandler(null)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        LogUtils.v(LogModule.VPN, "onMethodCall: ${call.method}")
         when (call.method) {
             "start" -> {
                 try {
                     val data = call.argument<String>("data")
                     if (data == null) {
+                        LogUtils.e(LogModule.VPN, "start: data parameter is null")
                         result.error("INVALID_ARGUMENT", "data parameter is required", null)
                         return
                     }
+                    LogUtils.d(LogModule.VPN, "start: parsing VpnOptions")
                     val vpnOptions = Gson().fromJson(data, VpnOptions::class.java)
+                    LogUtils.i(LogModule.VPN, "start: VPN start requested")
                     result.success(handleStart(vpnOptions))
                 } catch (e: Exception) {
-                    android.util.Log.e("VpnPlugin", "Failed to start VPN: ${e.message}")
+                    LogUtils.e(LogModule.VPN, "Failed to start VPN: ${e.message}", e)
                     result.error("PARSE_ERROR", "Failed to parse VpnOptions: ${e.message}", null)
                 }
             }
 
             "stop" -> {
+                LogUtils.i(LogModule.VPN, "stop: VPN stop requested")
                 handleStop()
                 result.success(true)
             }
 
             "getLocalIpAddresses" -> {
+                LogUtils.v(LogModule.VPN, "getLocalIpAddresses called")
                 result.success(getLocalIpAddresses())
             }
 
             "setSmartStopped" -> {
                 val value = call.argument<Boolean>("value") ?: false
+                LogUtils.d(LogModule.VPN, "setSmartStopped: $value")
                 GlobalState.isSmartStopped = value
                 result.success(true)
             }
@@ -137,21 +160,25 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
 
             "smartStop" -> {
+                LogUtils.i(LogModule.VPN, "smartStop: Smart stop requested")
                 handleSmartStop()
                 result.success(true)
             }
 
             "smartResume" -> {
+                LogUtils.i(LogModule.VPN, "smartResume: Smart resume requested")
                 val data = call.argument<String>("data")
                 result.success(handleSmartResume(Gson().fromJson(data, VpnOptions::class.java)))
             }
-            
+
             "setQuickResponse" -> {
                 quickResponseEnabled = call.argument<Boolean>("enabled") ?: false
+                LogUtils.d(LogModule.VPN, "setQuickResponse: enabled=$quickResponseEnabled")
                 result.success(true)
             }
 
             else -> {
+                LogUtils.w(LogModule.VPN, "Unknown method: ${call.method}")
                 result.notImplemented()
             }
         }
@@ -189,41 +216,55 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStart(options: VpnOptions): Boolean {
+        LogUtils.i(LogModule.VPN, "=== handleStart ===")
+        LogUtils.d(LogModule.VPN, "Options: enable=${options.enable}, dns=${options.dnsServerAddress}")
         onUpdateNetwork();
         if (options.enable != this.options?.enable) {
+            LogUtils.d(LogModule.VPN, "Enable mode changed, resetting service")
             this.bettBoxService = null
         }
         this.options = options
         when (options.enable) {
-            true -> handleStartVpn()
-            false -> handleStartService()
+            true -> {
+                LogUtils.d(LogModule.VPN, "Starting VPN mode")
+                handleStartVpn()
+            }
+            false -> {
+                LogUtils.d(LogModule.VPN, "Starting service mode")
+                handleStartService()
+            }
         }
         return true
     }
 
     private fun handleStartVpn() {
+        LogUtils.i(LogModule.VPN, "=== handleStartVpn ===")
         val plugin = GlobalState.getCurrentAppPlugin()
         if (plugin == null) {
-            android.util.Log.e("VpnPlugin", "handleStartVpn: AppPlugin is null")
+            LogUtils.e(LogModule.VPN, "handleStartVpn: AppPlugin is null")
             GlobalState.updateRunState(RunState.STOP)
             return
         }
-        
+
+        LogUtils.d(LogModule.VPN, "Requesting VPN permission")
         plugin.requestVpnPermission {
+            LogUtils.i(LogModule.VPN, "VPN permission granted, proceeding")
             handleStartService()
         }
-        
+
         // Safety check: if after 5 seconds still PENDING, reset to STOP
         scope.launch {
+            LogUtils.d(LogModule.VPN, "Starting safety timeout timer (5s)")
             delay(5000)
             if (GlobalState.currentRunState == RunState.PENDING) {
-                android.util.Log.w("VpnPlugin", "VPN start timed out in PENDING state, resetting to STOP")
+                LogUtils.w(LogModule.VPN, "VPN start timed out in PENDING state, resetting to STOP")
                 GlobalState.updateRunState(RunState.STOP)
             }
         }
     }
 
     fun requestGc() {
+        LogUtils.v(LogModule.VPN, "requestGc: Requesting garbage collection")
         flutterMethodChannel.invokeMethod("gc", null)
     }
 
@@ -233,6 +274,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val dns = networks.flatMap { network ->
             connectivity?.resolveDns(network) ?: emptyList()
         }.toSet().joinToString(",")
+        LogUtils.v(LogModule.VPN, "onUpdateNetwork: DNS=$dns")
         scope.launch {
             withContext(Dispatchers.Main) {
                 flutterMethodChannel.invokeMethod("dnsChanged", dns)
@@ -242,12 +284,14 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            LogUtils.v(LogModule.NETWORK, "NetworkCallback: onAvailable, network=$network")
             networks.add(network)
             onUpdateNetwork()
             handleNetworkChange()
         }
 
         override fun onLost(network: Network) {
+            LogUtils.v(LogModule.NETWORK, "NetworkCallback: onLost, network=$network")
             networks.remove(network)
             onUpdateNetwork()
             handleNetworkChange()
@@ -261,81 +305,113 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }.build()
 
     private fun registerNetworkCallback() {
+        LogUtils.d(LogModule.NETWORK, "Registering network callback")
         networks.clear()
-        connectivity?.registerNetworkCallback(request, callback)
+        try {
+            connectivity?.registerNetworkCallback(request, callback)
+            LogUtils.i(LogModule.NETWORK, "Network callback registered")
+        } catch (e: Exception) {
+            LogUtils.e(LogModule.NETWORK, "Failed to register network callback", e)
+        }
     }
 
     private fun unRegisterNetworkCallback() {
-        connectivity?.unregisterNetworkCallback(callback)
+        LogUtils.d(LogModule.NETWORK, "Unregistering network callback")
+        try {
+            connectivity?.unregisterNetworkCallback(callback)
+            LogUtils.i(LogModule.NETWORK, "Network callback unregistered")
+        } catch (e: Exception) {
+            LogUtils.e(LogModule.NETWORK, "Failed to unregister network callback", e)
+        }
         networks.clear()
         onUpdateNetwork()
     }
     
     private fun handleNetworkChange() {
-        if (!quickResponseEnabled) return
-        
+        if (!quickResponseEnabled) {
+            LogUtils.v(LogModule.NETWORK, "handleNetworkChange: quickResponse disabled, skipping")
+            return
+        }
+
         // Check runState to bypass quick response if not running
-        if (GlobalState.currentRunState != RunState.START) return
-        
+        if (GlobalState.currentRunState != RunState.START) {
+            LogUtils.v(LogModule.NETWORK, "handleNetworkChange: VPN not running, skipping")
+            return
+        }
+
         val currentNetworkType = getCurrentNetworkType()
         if (lastNetworkType == null) {
             lastNetworkType = currentNetworkType
+            LogUtils.d(LogModule.NETWORK, "handleNetworkChange: Initial network type=$currentNetworkType")
             return
         }
-        
+
         // Network type changed (WiFi <-> Mobile)
         if (currentNetworkType != lastNetworkType) {
+            LogUtils.i(LogModule.NETWORK, "Network type changed: $lastNetworkType -> $currentNetworkType")
             lastNetworkType = currentNetworkType
-            
+
             val now = System.currentTimeMillis()
-            
+
             // Reset window if expired
             if (now - disconnectWindowStart > disconnectWindowMs) {
+                LogUtils.d(LogModule.NETWORK, "Network change window expired, resetting counter")
                 disconnectWindowStart = now
                 disconnectCount = 0
             }
-            
+
             // Check if within limit
             if (disconnectCount < maxDisconnectsInWindow) {
                 disconnectCount++
-                android.util.Log.d("VpnPlugin", "Quick Response: Network changed, disconnecting ($disconnectCount/$maxDisconnectsInWindow)")
+                LogUtils.i(LogModule.NETWORK, "Quick Response: Network changed, disconnecting ($disconnectCount/$maxDisconnectsInWindow)")
                 handleStop()
             } else {
-                android.util.Log.d("VpnPlugin", "Quick Response: Disconnect limit reached, ignoring")
+                LogUtils.w(LogModule.NETWORK, "Quick Response: Disconnect limit reached, ignoring")
             }
+        } else {
+            LogUtils.v(LogModule.NETWORK, "Network type unchanged, skipping")
         }
     }
-    
+
     private fun getCurrentNetworkType(): Int {
         val activeNetwork = connectivity?.activeNetwork ?: return -1
         val caps = connectivity?.getNetworkCapabilities(activeNetwork) ?: return -1
-        return when {
+        val type = when {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 1
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 2
             else -> 0
         }
+        LogUtils.v(LogModule.NETWORK, "getCurrentNetworkType: $type")
+        return type
     }
 
     private suspend fun startForeground() {
+        LogUtils.v(LogModule.VPN, "=== startForeground ===")
         val shouldUpdate = GlobalState.runLock.withLock {
             GlobalState.currentRunState == RunState.START || GlobalState.isSmartStopped
         }
-        if (!shouldUpdate) return
+        if (!shouldUpdate) {
+            LogUtils.v(LogModule.VPN, "startForeground: Should not update, skipping")
+            return
+        }
+        
         val data = try {
             withTimeoutOrNull(1200L) {
                 flutterMethodChannel.awaitResult<String>("getStartForegroundParams")
             }
         } catch (e: Exception) {
-            android.util.Log.e("VpnPlugin", "getStartForegroundParams timeout: ${e.message}")
+            LogUtils.e(LogModule.VPN, "getStartForegroundParams timeout: ${e.message}")
             null
         }
 
         val startForegroundParams = try {
             data?.let { Gson().fromJson(it, StartForegroundParams::class.java) }
         } catch (e: Exception) {
-            android.util.Log.e("VpnPlugin", "Failed to parse StartForegroundParams: ${e.message}")
+            LogUtils.e(LogModule.VPN, "Failed to parse StartForegroundParams: ${e.message}")
             null
         } ?: lastStartForegroundParams ?: StartForegroundParams(title = "", content = "")
+
+        LogUtils.d(LogModule.VPN, "StartForeground params: title='${startForegroundParams.title}', content='${startForegroundParams.content}'")
 
         val shouldNotify = GlobalState.runLock.withLock {
             if (lastStartForegroundParams != startForegroundParams) {
@@ -346,14 +422,18 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         if (shouldNotify) {
+            LogUtils.d(LogModule.VPN, "Notification content changed, updating")
             try {
                 bettBoxService?.startForeground(
                     startForegroundParams.title,
                     startForegroundParams.content,
                 )
+                LogUtils.i(LogModule.VPN, "Foreground notification updated")
             } catch (e: Exception) {
-                android.util.Log.e("VpnPlugin", "startForeground error: ${e.message}")
+                LogUtils.e(LogModule.VPN, "startForeground error: ${e.message}")
             }
+        } else {
+            LogUtils.v(LogModule.VPN, "Notification content unchanged, skipping update")
         }
     }
 
@@ -361,16 +441,21 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * Force update notification icon
      */
     fun updateNotificationIcon() {
+        LogUtils.i(LogModule.VPN, "=== updateNotificationIcon ===")
         scope.launch {
             try {
                 // Recreate notification for new icon
                 lastStartForegroundParams?.let { params ->
+                    LogUtils.d(LogModule.VPN, "Recreating notification with params: title='${params.title}'")
                     (bettBoxService as? BettboxService)?.resetNotificationBuilder()
                     (bettBoxService as? BettboxVpnService)?.resetNotificationBuilder()
                     bettBoxService?.startForeground(params.title, params.content)
+                    LogUtils.i(LogModule.VPN, "Notification icon updated")
+                } ?: run {
+                    LogUtils.w(LogModule.VPN, "updateNotificationIcon: lastStartForegroundParams is null")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("VpnPlugin", "updateNotificationIcon error: ${e.message}")
+                LogUtils.e(LogModule.VPN, "updateNotificationIcon error: ${e.message}")
             }
         }
     }
@@ -378,63 +463,77 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     suspend fun getStatus(): Boolean? {
         return withContext(Dispatchers.Default) {
+            LogUtils.v(LogModule.VPN, "getStatus: Checking VPN status")
             flutterMethodChannel.awaitResult<Boolean>("status", null)
         }
     }
 
     private fun handleStartService() {
+        LogUtils.i(LogModule.VPN, "=== handleStartService ===")
+        
         if (bettBoxService == null) {
-            android.util.Log.d("VpnPlugin", "bettBoxService is null, binding service...")
+            LogUtils.d(LogModule.VPN, "bettBoxService is null, binding service...")
             bindService()
             return
         }
+        
         GlobalState.runLock.withLock {
             val currentOptions = options
             if (currentOptions == null) {
-                android.util.Log.e("VpnPlugin", "Start service failed: options is null")
+                LogUtils.e(LogModule.VPN, "Start service failed: options is null")
                 GlobalState.updateRunState(RunState.STOP)
                 return
             }
 
             // Always attempt to re-establish the VPN if called, rather than skipping purely on state.
             // This handles cases where state is START but the actual fd/TUN was destroyed.
+            LogUtils.d(LogModule.VPN, "Updating run state to START")
             GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
-            
+
             try {
-                android.util.Log.d("VpnPlugin", "Starting VPN service with options...")
+                LogUtils.i(LogModule.VPN, "Starting VPN service with options...")
+                LogUtils.d(LogModule.VPN, "VPN options: enable=${currentOptions.enable}, dns=${currentOptions.dnsServerAddress}")
                 val fd = bettBoxService?.start(currentOptions)
                 if (fd == null || fd == 0) {
-                    android.util.Log.e("VpnPlugin", "Failed to start VPN: fd is null or 0")
+                    LogUtils.e(LogModule.VPN, "Failed to start VPN: fd is null or 0")
                     GlobalState.updateRunState(RunState.STOP)
                     return
                 }
-                
-                android.util.Log.d("VpnPlugin", "VPN service started, FD: $fd. Starting Go TUN...")
+
+                LogUtils.i(LogModule.VPN, "VPN service started successfully, FD: $fd. Starting Go TUN...")
                 Core.startTun(
                     fd = fd,
                     protect = this::protect,
                     resolverProcess = this::resolverProcess,
                 )
+                LogUtils.i(LogModule.VPN, "Go TUN started")
+                
                 // Update notice on start
                 scope.launch {
+                    LogUtils.d(LogModule.VPN, "Updating foreground notification")
                     startForeground()
                 }
+                
                 // Install SuspendModule if dozeSuspend is enabled
                 if (currentOptions.dozeSuspend == true) {
+                    LogUtils.d(LogModule.VPN, "dozeSuspend enabled, installing SuspendModule")
                     suspendModule?.uninstall()
                     suspendModule = SuspendModule(BettboxApplication.getAppContext())
                     suspendModule?.install()
+                    LogUtils.i(LogModule.VPN, "SuspendModule installed")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("VpnPlugin", "Exception during VPN start: ${e.message}", e)
+                LogUtils.e(LogModule.VPN, "Exception during VPN start: ${e.message}", e)
                 GlobalState.updateRunState(RunState.STOP)
             }
         }
     }
 
     private fun protect(fd: Int): Boolean {
-        return (bettBoxService as? BettboxVpnService)?.protect(fd) == true
+        val result = (bettBoxService as? BettboxVpnService)?.protect(fd) == true
+        LogUtils.v(LogModule.VPN, "protect: fd=$fd, result=$result")
+        return result
     }
 
     private fun resolverProcess(
@@ -460,18 +559,35 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     fun handleStop() {
+        LogUtils.i(LogModule.VPN, "=== handleStop ===")
         GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState == RunState.STOP) return
+            if (GlobalState.currentRunState == RunState.STOP) {
+                LogUtils.v(LogModule.VPN, "Already stopped, skipping")
+                return
+            }
+            LogUtils.d(LogModule.VPN, "Updating run state to STOP")
             GlobalState.updateRunState(RunState.STOP)
             lastStartForegroundParams = null
+            
             // Uninstall SuspendModule
-            suspendModule?.uninstall()
-            suspendModule = null
+            if (suspendModule != null) {
+                LogUtils.d(LogModule.VPN, "Uninstalling SuspendModule")
+                suspendModule?.uninstall()
+                suspendModule = null
+            }
+            
             // Stop TUN first to clear routes
+            LogUtils.i(LogModule.VPN, "Stopping TUN")
             Core.stopTun()
+            LogUtils.d(LogModule.VPN, "TUN stopped")
+            
             // Then stop service
+            LogUtils.i(LogModule.VPN, "Stopping VPN service")
             bettBoxService?.stop()
+            LogUtils.d(LogModule.VPN, "VPN service stopped")
+            
             GlobalState.handleTryDestroy()
+            LogUtils.i(LogModule.VPN, "=== handleStop Completed ===")
         }
     }
 
@@ -480,19 +596,35 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * Used by Smart Auto Stop feature to maintain notification while VPN is paused.
      */
     fun handleSmartStop() {
+        LogUtils.i(LogModule.VPN, "=== handleSmartStop ===")
         GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState == RunState.STOP) return
+            if (GlobalState.currentRunState == RunState.STOP) {
+                LogUtils.v(LogModule.VPN, "Already stopped, skipping smart stop")
+                return
+            }
+            LogUtils.d(LogModule.VPN, "Updating run state to STOP (smart)")
             GlobalState.updateRunState(RunState.STOP)
             GlobalState.isSmartStopped = true
+            LogUtils.d(LogModule.VPN, "isSmartStopped set to true")
+            
             // Uninstall SuspendModule
-            suspendModule?.uninstall()
-            suspendModule = null
+            if (suspendModule != null) {
+                LogUtils.d(LogModule.VPN, "Uninstalling SuspendModule")
+                suspendModule?.uninstall()
+                suspendModule = null
+            }
+            
             // Stop TUN but keep service running
+            LogUtils.i(LogModule.VPN, "Stopping TUN (smart stop)")
             Core.stopTun()
+            LogUtils.d(LogModule.VPN, "TUN stopped (smart)")
+            
             // Update notification to show "SmartAutoStopServiceRunning"
             scope.launch {
+                LogUtils.d(LogModule.VPN, "Updating foreground notification")
                 startForeground()
             }
+            LogUtils.i(LogModule.VPN, "=== handleSmartStop Completed ===")
         }
     }
 
@@ -501,47 +633,72 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
      * Restarts the TUN without rebinding the service.
      */
     fun handleSmartResume(options: VpnOptions): Boolean {
+        LogUtils.i(LogModule.VPN, "=== handleSmartResume ===")
         GlobalState.runLock.withLock {
-            if (GlobalState.currentRunState == RunState.START) return true
+            if (GlobalState.currentRunState == RunState.START) {
+                LogUtils.v(LogModule.VPN, "Already running, skipping smart resume")
+                return true
+            }
+            LogUtils.d(LogModule.VPN, "isSmartStopped set to false")
             GlobalState.isSmartStopped = false
             this.options = options
-            
+
             if (bettBoxService == null) {
                 // Service was destroyed, need to rebind
+                LogUtils.w(LogModule.VPN, "Service was destroyed, need to rebind")
                 bindService()
                 return true
             }
-            
+
+            LogUtils.d(LogModule.VPN, "Updating run state to START")
             GlobalState.updateRunState(RunState.START)
             lastStartForegroundParams = null
+            
+            LogUtils.i(LogModule.VPN, "Starting VPN service")
             val fd = bettBoxService?.start(options)
             Core.startTun(
                 fd = fd ?: 0,
                 protect = this::protect,
                 resolverProcess = this::resolverProcess,
             )
+            LogUtils.i(LogModule.VPN, "TUN started")
+            
             // Update notification to "Service running"
             scope.launch {
+                LogUtils.d(LogModule.VPN, "Updating foreground notification")
                 startForeground()
             }
+            
             // Install SuspendModule if dozeSuspend is enabled
             if (options.dozeSuspend == true) {
+                LogUtils.d(LogModule.VPN, "dozeSuspend enabled, installing SuspendModule")
                 suspendModule?.uninstall()
                 suspendModule = SuspendModule(BettboxApplication.getAppContext())
                 suspendModule?.install()
+                LogUtils.i(LogModule.VPN, "SuspendModule installed")
             }
+            LogUtils.i(LogModule.VPN, "=== handleSmartResume Completed ===")
             return true
         }
     }
 
     private fun bindService() {
+        LogUtils.i(LogModule.VPN, "=== bindService ===")
         if (isBind) {
+            LogUtils.d(LogModule.VPN, "Already bound, unbinding first")
             BettboxApplication.getAppContext().unbindService(connection)
         }
         val intent = when (options?.enable == true) {
-            true -> Intent(BettboxApplication.getAppContext(), BettboxVpnService::class.java)
-            false -> Intent(BettboxApplication.getAppContext(), BettboxService::class.java)
+            true -> {
+                LogUtils.d(LogModule.VPN, "Binding to BettboxVpnService")
+                Intent(BettboxApplication.getAppContext(), BettboxVpnService::class.java)
+            }
+            false -> {
+                LogUtils.d(LogModule.VPN, "Binding to BettboxService")
+                Intent(BettboxApplication.getAppContext(), BettboxService::class.java)
+            }
         }
+        LogUtils.i(LogModule.VPN, "Binding service with BIND_AUTO_CREATE")
         BettboxApplication.getAppContext().bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
 }
