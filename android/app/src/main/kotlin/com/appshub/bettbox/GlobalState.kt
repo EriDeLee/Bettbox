@@ -188,6 +188,40 @@ object GlobalState {
         }
     }
 
+    /**
+     * Reset all state to initial values.
+     * Called when app is updated to ensure clean state.
+     */
+    fun resetState() {
+        LogUtils.i(LogModule.GLOBAL, "=== resetState: Performing full state reset ===")
+        runLock.withLock {
+            // Reset run state
+            currentRunState = RunState.STOP
+            try {
+                if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                    runState.value = RunState.STOP
+                } else {
+                    runState.postValue(RunState.STOP)
+                }
+            } catch (e: Exception) {
+                LogUtils.e(LogModule.GLOBAL, "Failed to post runState reset", e)
+                runState.postValue(RunState.STOP)
+            }
+
+            // Reset smart stop flag
+            isSmartStopped = false
+
+            // Destroy service engine
+            serviceEngine?.destroy()
+            serviceEngine = null
+
+            // Reset debounce timer
+            lastToggleAt = 0L
+
+            LogUtils.i(LogModule.GLOBAL, "=== resetState Completed ===")
+        }
+    }
+
     fun destroyServiceEngine() {
         LogUtils.i(LogModule.GLOBAL, "=== destroyServiceEngine ===")
         runLock.withLock {
@@ -203,6 +237,14 @@ object GlobalState {
             LogUtils.d(LogModule.GLOBAL, "Service engine already exists, skipping")
             return
         }
+
+        // Safety check: if currentRunState is not STOP, reset first
+        // This handles cases where the app was updated and state is inconsistent
+        if (currentRunState != RunState.STOP) {
+            LogUtils.w(LogModule.GLOBAL, "initServiceEngine: currentRunState is ${currentRunState}, resetting to STOP")
+            updateRunState(RunState.STOP)
+        }
+
         LogUtils.d(LogModule.GLOBAL, "Destroying any existing service engine")
         destroyServiceEngine()
         runLock.withLock {
@@ -212,7 +254,7 @@ object GlobalState {
             serviceEngine?.plugins?.add(AppPlugin())
             serviceEngine?.plugins?.add(TilePlugin())
             LogUtils.d(LogModule.GLOBAL, "Plugins registered: VpnPlugin, AppPlugin, TilePlugin")
-            
+
             val vpnService = DartExecutor.DartEntrypoint(
                 FlutterInjector.instance().flutterLoader().findAppBundlePath(),
                 "_service"

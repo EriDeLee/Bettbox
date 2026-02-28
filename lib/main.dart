@@ -183,10 +183,19 @@ Future<void> _service(List<String> flags) async {
     commonPrint.debug('is_vpn_running flag: $isVpnRunning', module: LogModule.vpn);
 
     if (!isVpnRunning) {
-      commonPrint.error('is_vpn_running is false. Aborting quick start to prevent zombie VPN.', module: LogModule.vpn);
+      // Quick start aborted - VPN was not running before update
+      // This is expected after an app update. Gracefully exit and let
+      // the user start VPN manually when they open the app.
+      commonPrint.info(
+        'Quick start aborted: is_vpn_running is false. '
+        'This is normal after app update. Service will exit gracefully.',
+        module: LogModule.vpn,
+      );
+      // Ensure VPN is fully stopped before exit
       await vpn?.stop();
+      // Use graceful exit instead of immediate termination
+      // This allows any pending async operations to complete
       exit(0);
-      return;
     }
 
     commonPrint.debug('Initializing Clash Geo data', module: LogModule.core);
@@ -202,6 +211,9 @@ Future<void> _service(List<String> flags) async {
       final profileId = globalState.config.currentProfileId;
       if (profileId == null) {
         commonPrint.error('No profile ID selected', module: LogModule.core);
+        // Clean exit on missing profile
+        await vpn?.stop();
+        exit(0);
         return;
       }
       final params = await globalState.getSetupParams(pathConfig: clashConfig);
