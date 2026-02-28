@@ -188,22 +188,15 @@ object LogUtils {
     fun e(module: LogModule, message: String, throwable: Throwable? = null) {
         log(module, LogLevel.ERROR, message, throwable)
     }
-    
+
     fun e(module: LogModule, throwable: Throwable, message: String = throwable.message ?: "Unknown error") {
         log(module, LogLevel.ERROR, message, throwable)
     }
-    
+
     fun wtf(module: LogModule, message: String, throwable: Throwable? = null) {
         log(module, LogLevel.ASSERT, message, throwable)
     }
-    
-    /**
-     * 记录带异常堆栈的日志
-     */
-    fun e(module: LogModule, throwable: Throwable, message: String = throwable.message ?: "Unknown error") {
-        log(module, LogLevel.ERROR, message, throwable)
-    }
-    
+
     /**
      * 记录方法调用日志
      */
