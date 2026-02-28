@@ -127,6 +127,16 @@ Future<void> _service(List<String> flags) async {
     _handleMainIpc(clashLibHandler);
   } else {
     commonPrint.log('quick start');
+
+    final prefs = await preferences.sharedPreferencesCompleter.future;
+    final isVpnRunning = prefs?.getBool('is_vpn_running') ?? false;
+
+    if (!isVpnRunning) {
+      commonPrint.log('VpnService auto-restarted but is_vpn_running is false. Aborting.');
+      await vpn?.stop();
+      exit(0);
+    }
+
     await ClashCore.initGeo();
     app.tip(appLocalizations.startVpn);
     final homeDirPath = await appPath.homeDirPath;
