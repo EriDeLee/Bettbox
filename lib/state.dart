@@ -167,7 +167,7 @@ class GlobalState {
         
         // If we think we started, but native says we are stopped
         if (isStart && !isVpnRunningFlag) {
-           commonPrint.log('VPN start verification failed, resetting state');
+           commonPrint.warning('VPN start verification failed, resetting state', module: LogModule.vpn);
            startTime = null;
            stopUpdateTasks();
         }
@@ -359,7 +359,7 @@ class GlobalState {
   /// Backup successful config for rollback
   void backupSuccessfulConfig(SetupParams params) {
     _lastSuccessfulSetupParams = params;
-    commonPrint.log('Config backup created');
+    commonPrint.debug('Config backup created', module: LogModule.config);
   }
 
   /// Get last successful config for rollback

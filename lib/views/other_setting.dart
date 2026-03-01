@@ -320,7 +320,7 @@ class NetworkFixItem extends ConsumerWidget {
         }
       }
     } catch (e) {
-      commonPrint.log('Network fix error: $e');
+      commonPrint.error('Network fix error: $e', module: LogModule.vpn);
       rethrow;
     }
   }
@@ -372,7 +372,7 @@ class BatteryOptimizationItem extends ConsumerWidget {
         await app.requestIgnoreBatteryOptimizations();
       }
     } catch (e) {
-      commonPrint.log('Battery optimization error: $e');
+      commonPrint.warning('Battery optimization error: $e', module: LogModule.app);
     }
   }
 

@@ -1,5 +1,6 @@
 package com.appshub.bettbox.util
 
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.*
@@ -44,20 +45,51 @@ enum class LogLevel(val priority: Int) {
  * 5. 支持发布版本自动禁用详细日志
  */
 object LogUtils {
+    private const val TAG = "LogUtils"
+
     // 全局日志级别，发布版本默认为 INFO
     @Volatile
     var minLogLevel: LogLevel = LogLevel.DEBUG  // 默认使用 DEBUG，可通过外部设置
-    
+
     // 是否为 debug 模式（通过外部设置）
     @Volatile
     var isDebugMode: Boolean = true
-    
+
+    // 是否已初始化
+    @Volatile
+    private var isInitialized: Boolean = false
+
     // 启用的模块（空表示启用所有）
     @Volatile
     private var enabledModules: Set<LogModule> = emptySet()
-    
+
     // 日期格式化
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+
+    /**
+     * 初始化日志系统
+     * 根据应用是否为调试版本自动设置日志级别
+     *
+     * @param context 应用上下文
+     */
+    fun init(context: android.content.Context) {
+        if (isInitialized) return
+        isInitialized = true
+
+        // 检测是否为调试版本
+        isDebugMode = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+        // 根据调试模式设置默认日志级别
+        minLogLevel = if (isDebugMode) {
+            LogLevel.DEBUG
+        } else {
+            LogLevel.INFO
+        }
+
+        // 使用 Log.i 而不是 LogUtils.i，因为此时 LogUtils 尚未完全初始化
+        Log.i(TAG, "=== LogUtils Initialized ===")
+        Log.i(TAG, "Debug mode: $isDebugMode, Min log level: $minLogLevel")
+    }
     
     /**
      * 设置启用的模块

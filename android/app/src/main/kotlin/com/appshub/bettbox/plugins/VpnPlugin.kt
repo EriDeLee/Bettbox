@@ -210,7 +210,7 @@ data object VpnPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("VpnPlugin", "getLocalIpAddresses error: ${e.message}")
+            LogUtils.e(LogModule.VPN, "getLocalIpAddresses error: ${e.message}", e)
         }
         return ipAddresses
     }

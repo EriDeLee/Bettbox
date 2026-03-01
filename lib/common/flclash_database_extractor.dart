@@ -34,14 +34,14 @@ class FlClashDatabaseExtractor {
           final profile = _convertRowToProfile(row);
           profiles.add(profile);
         } catch (e) {
-          commonPrint.log('Failed to convert profile row: $e');
+          commonPrint.warning('Failed to convert profile row: $e', module: LogModule.app);
           // 继续处理其他 Profile
         }
       }
 
       return profiles;
     } catch (e) {
-      commonPrint.log('Failed to extract profiles from database: $e');
+      commonPrint.error('Failed to extract profiles from database: $e', module: LogModule.app);
       rethrow;
     } finally {
       await db?.close();
@@ -61,7 +61,7 @@ class FlClashDatabaseExtractor {
     if (rawLabel != null &&
         (rawLabel.contains('upload=') || rawLabel.contains('download='))) {
       // 场景：label 字段包含流量信息，需要寻找真实名称
-      commonPrint.log('Detected traffic info in label field for profile $id');
+      commonPrint.debug('Detected traffic info in label field for profile $id', module: LogModule.app);
 
       // 尝试从其他字段获取名称
       label =
@@ -71,7 +71,7 @@ class FlClashDatabaseExtractor {
           _extractNameFromUrl(url) ??
           'Subscription $id';
 
-      commonPrint.log('Using alternative label: $label');
+      commonPrint.debug('Using alternative label: $label', module: LogModule.app);
     } else {
       // 场景：label 是正常的友好名称
       label = rawLabel ?? 'Subscription $id';
@@ -141,7 +141,7 @@ class FlClashDatabaseExtractor {
         return uri.host;
       }
     } catch (e) {
-      commonPrint.log('Failed to extract name from URL: $e');
+      commonPrint.debug('Failed to extract name from URL: $e', module: LogModule.app);
     }
 
     return null;
@@ -154,7 +154,7 @@ class FlClashDatabaseExtractor {
       final map = json.decode(jsonStr) as Map<String, dynamic>;
       return SubscriptionInfo.fromJson(map);
     } catch (e) {
-      commonPrint.log('Failed to parse subscriptionInfo: $e');
+      commonPrint.debug('Failed to parse subscriptionInfo: $e', module: LogModule.app);
       return null;
     }
   }
@@ -166,7 +166,7 @@ class FlClashDatabaseExtractor {
       final map = json.decode(jsonStr);
       return Map<String, String>.from(map);
     } catch (e) {
-      commonPrint.log('Failed to parse selectedMap: $e');
+      commonPrint.debug('Failed to parse selectedMap: $e', module: LogModule.app);
       return {};
     }
   }
@@ -178,7 +178,7 @@ class FlClashDatabaseExtractor {
       final list = json.decode(jsonStr) as List;
       return Set<String>.from(list);
     } catch (e) {
-      commonPrint.log('Failed to parse unfoldSet: $e');
+      commonPrint.debug('Failed to parse unfoldSet: $e', module: LogModule.app);
       return {};
     }
   }

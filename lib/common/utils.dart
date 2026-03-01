@@ -388,7 +388,7 @@ class Utils {
       final stopwatch = Stopwatch()..start();
       final res = await function();
       stopwatch.stop();
-      commonPrint.log('Time：${stopwatch.elapsedMilliseconds} ms');
+      commonPrint.debug('Time: ${stopwatch.elapsedMilliseconds} ms', module: LogModule.app);
       return res;
     }
     return await function();

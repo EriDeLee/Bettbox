@@ -50,7 +50,7 @@ class ClashService extends ClashHandlerInterface {
         }
       },
       (error, stack) {
-        commonPrint.log(error.toString());
+        commonPrint.error('$error', module: LogModule.core);
         if (error is SocketException) {
           globalState.showNotifier(error.toString());
           // globalState.appController.restartCore();
@@ -102,7 +102,7 @@ class ClashService extends ClashHandlerInterface {
     process?.stderr.listen((e) {
       final error = utf8.decode(e);
       if (error.isNotEmpty) {
-        commonPrint.log(error);
+        commonPrint.error(error, module: LogModule.core);
       }
     });
     isStarting = false;

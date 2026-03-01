@@ -107,7 +107,7 @@ class _CommonTargetIconState extends State<CommonTargetIcon> {
       }
       return true;
     } catch (e) {
-      commonPrint.log('SVG validation failed: $e');
+      commonPrint.warning('SVG validation failed: $e', module: LogModule.ui);
       return false;
     }
   }
@@ -213,7 +213,7 @@ class _CommonTargetIconState extends State<CommonTargetIcon> {
             placeholderBuilder: (_) => _defaultIcon(),
           );
         } catch (e) {
-          commonPrint.log('Failed to load SVG: $e');
+          commonPrint.warning('Failed to load SVG: $e', module: LogModule.ui);
           return _defaultIcon();
         }
       }

@@ -16,6 +16,8 @@ import com.appshub.bettbox.MainActivity
 import com.appshub.bettbox.R
 import com.appshub.bettbox.extensions.getActionPendingIntent
 import com.appshub.bettbox.models.VpnOptions
+import com.appshub.bettbox.util.LogModule
+import com.appshub.bettbox.util.LogUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -60,22 +62,22 @@ fun Service.createBettboxNotificationBuilder(): Deferred<NotificationCompat.Buil
         val targetComponent = when {
             // Light 启用
             lightState == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> {
-                android.util.Log.d("Notification", "Using MainActivityLight (ENABLED)")
+                LogUtils.d(LogModule.UI, "Using MainActivityLight (ENABLED)")
                 lightComponent
             }
             // Light 禁用
             lightState == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> {
-                android.util.Log.d("Notification", "Using MainActivity (Light DISABLED)")
+                LogUtils.d(LogModule.UI, "Using MainActivity (Light DISABLED)")
                 defaultComponent
             }
             // Default 启用
             defaultState == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> {
-                android.util.Log.d("Notification", "Using MainActivity (ENABLED)")
+                LogUtils.d(LogModule.UI, "Using MainActivity (ENABLED)")
                 defaultComponent
             }
             // Default 禁用
             defaultState == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> {
-                android.util.Log.d("Notification", "Using MainActivityLight (Default DISABLED)")
+                LogUtils.d(LogModule.UI, "Using MainActivityLight (Default DISABLED)")
                 lightComponent
             }
             // 检查 Manifest
@@ -84,14 +86,14 @@ fun Service.createBettboxNotificationBuilder(): Deferred<NotificationCompat.Buil
                     // 检查 Light Activity
                     val lightActivityInfo = packageManager.getActivityInfo(lightComponent, 0)
                     if (lightActivityInfo.enabled) {
-                        android.util.Log.d("Notification", "Using MainActivityLight (Manifest enabled)")
+                        LogUtils.d(LogModule.UI, "Using MainActivityLight (Manifest enabled)")
                         lightComponent
                     } else {
-                        android.util.Log.d("Notification", "Using MainActivity (Manifest default)")
+                        LogUtils.d(LogModule.UI, "Using MainActivity (Manifest default)")
                         defaultComponent
                     }
                 } catch (e: Exception) {
-                    android.util.Log.d("Notification", "Using MainActivity (fallback)")
+                    LogUtils.d(LogModule.UI, "Using MainActivity (fallback)")
                     defaultComponent
                 }
             }
@@ -106,7 +108,7 @@ fun Service.createBettboxNotificationBuilder(): Deferred<NotificationCompat.Buil
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         
-        android.util.Log.d("Notification", "Created intent for: ${targetComponent.className}")
+        LogUtils.d(LogModule.UI, "Created intent for: ${targetComponent.className}")
 
         val pendingIntent = if (Build.VERSION.SDK_INT >= 31) {
             PendingIntent.getActivity(

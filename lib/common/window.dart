@@ -63,7 +63,7 @@ class Window {
       try {
         await windowManager.setResizable(false);
       } catch (e) {
-        commonPrint.log('Failed to apply the locked state: $e');
+        commonPrint.warning('Failed to apply the locked state: $e', module: LogModule.ui);
       }
     }
   }
@@ -89,9 +89,9 @@ class Window {
   Future<void> close() async {
     try {
       await trayManager.destroy();
-      commonPrint.log('The tray icon has been destroyed.');
+      commonPrint.debug('The tray icon has been destroyed.', module: LogModule.ui);
     } catch (e) {
-      commonPrint.log('Failed to destroy the tray icon: $e');
+      commonPrint.error('Failed to destroy the tray icon: $e', module: LogModule.ui);
     }
 
     exit(0);

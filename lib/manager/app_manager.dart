@@ -346,7 +346,7 @@ class WindowLockButton extends ConsumerWidget {
               .read(windowSettingProvider.notifier)
               .updateState((state) => state.copyWith(isLocked: newLocked));
         } catch (e) {
-          commonPrint.log('Window Lock Failed: $e');
+          commonPrint.warning('Window Lock Failed: $e', module: LogModule.ui);
         }
       },
       icon: Icon(

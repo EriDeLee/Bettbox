@@ -223,7 +223,7 @@ Future<void> _service(List<String> flags) async {
         params,
         globalState.getCoreState(),
       );
-      debugPrint(res);
+      commonPrint.debug('Quick start result: $res', module: LogModule.core);
       if (res.isNotEmpty) {
         commonPrint.error('Quick start failed: $res', module: LogModule.core);
         await vpn?.stop();

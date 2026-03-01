@@ -73,10 +73,10 @@ class Request {
       if (!hasUpdate) return null;
       return data;
     } on DioException catch (e) {
-      commonPrint.log('Check update failed: ${e.message}');
+      commonPrint.warning('Check update failed: ${e.message}', module: LogModule.app);
       return null;
     } catch (e) {
-      commonPrint.log('Check update error: $e');
+      commonPrint.error('Check update error: $e', module: LogModule.app);
       return null;
     }
   }
@@ -281,7 +281,7 @@ class Request {
       final data = response.data as String;
       return data.isEmpty;
     } catch (e) {
-      commonPrint.log('Failed to start core by helper: $e');
+      commonPrint.error('Failed to start core by helper: $e', module: LogModule.core);
       return false;
     }
   }
@@ -304,7 +304,7 @@ class Request {
       }
       return true;
     } catch (e) {
-      commonPrint.log('Failed to stop core by helper: $e');
+      commonPrint.error('Failed to stop core by helper: $e', module: LogModule.core);
       return false;
     }
   }

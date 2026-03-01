@@ -55,7 +55,7 @@ extension StringExtension on String {
       RegExp(this);
       return true;
     } catch (e) {
-      commonPrint.log(e.toString());
+      commonPrint.debug('Invalid regex: $e', module: LogModule.app);
       return false;
     }
   }

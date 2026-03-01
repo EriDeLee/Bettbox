@@ -95,7 +95,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           await controller.start();
         } catch (e) {
           // Handle start error silently
-          commonPrint.log('Camera start error: $e');
+          commonPrint.warning('Camera start error: $e', module: LogModule.ui);
         }
       }
     }

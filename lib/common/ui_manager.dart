@@ -26,12 +26,12 @@ class UiManager {
       if (await uiDir.exists()) {
         final files = await uiDir.list().toList();
         if (files.isNotEmpty) {
-          commonPrint.log('UI already exists, skip extraction');
+          commonPrint.debug('UI already exists, skip extraction', module: LogModule.ui);
           return;
         }
       }
 
-      commonPrint.log('Extracting UI from assets...');
+      commonPrint.info('Extracting UI from assets...', module: LogModule.ui);
 
       // 创建 UI 目录
       await uiDir.create(recursive: true);
@@ -79,7 +79,7 @@ class UiManager {
         // 复制文件到目标目录
         await _copyDirectory(Directory(sourceDir), uiDir);
 
-        commonPrint.log('UI extracted successfully to: $uiPath');
+        commonPrint.info('UI extracted successfully to: $uiPath', module: LogModule.ui);
       } finally {
         // 清理临时目录
         if (await tempExtractDir.exists()) {
@@ -87,7 +87,7 @@ class UiManager {
         }
       }
     } catch (e) {
-      commonPrint.log('Error extracting UI: $e');
+      commonPrint.error('Error extracting UI: $e', module: LogModule.ui);
       rethrow;
     }
   }
@@ -116,10 +116,10 @@ class UiManager {
 
       if (await uiDir.exists()) {
         await uiDir.delete(recursive: true);
-        commonPrint.log('UI cleared successfully');
+        commonPrint.info('UI cleared successfully', module: LogModule.ui);
       }
     } catch (e) {
-      commonPrint.log('Error clearing UI: $e');
+      commonPrint.error('Error clearing UI: $e', module: LogModule.ui);
     }
   }
 }

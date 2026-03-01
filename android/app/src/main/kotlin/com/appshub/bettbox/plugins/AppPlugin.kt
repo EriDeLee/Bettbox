@@ -486,7 +486,7 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
         try {
             activityRef?.get()?.startActivity(intent)
         } catch (e: Exception) {
-            println(e)
+            LogUtils.e(LogModule.PLUGIN, "Failed to start activity: ${e.message}", e)
         }
     }
 

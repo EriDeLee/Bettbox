@@ -213,7 +213,7 @@ class Tray {
       globalState.updateWakelockState(!enabled);
       await globalState.appController.updateTray();
     } catch (e) {
-      commonPrint.log('WakeLock toggle error: $e');
+      commonPrint.error('WakeLock toggle error: $e', module: LogModule.app);
     }
   }
 }

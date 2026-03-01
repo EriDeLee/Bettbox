@@ -24,10 +24,10 @@ class DAVClient {
   Future<bool> _ping() async {
     try {
       await client.ping();
-      commonPrint.log('WebDAV ping successful');
+      commonPrint.debug('WebDAV ping successful', module: LogModule.app);
       return true;
     } catch (e) {
-      commonPrint.log('WebDAV ping failed: $e');
+      commonPrint.error('WebDAV ping failed: $e', module: LogModule.app);
       return false;
     }
   }
@@ -39,8 +39,9 @@ class DAVClient {
   /// 备份数据到 WebDAV（带重试机制）
   Future<bool> backup(Uint8List data) async {
     return await _retryOperation(() async {
-      commonPrint.log(
+      commonPrint.info(
         'WebDAV backup: uploading ${data.length} bytes to $backupFile',
+        module: LogModule.app,
       );
 
       // 确保目录存在
@@ -48,12 +49,12 @@ class DAVClient {
         await client.mkdir(root);
       } catch (e) {
         // 目录可能已存在，忽略错误
-        commonPrint.log('WebDAV mkdir warning (may already exist): $e');
+        commonPrint.debug('WebDAV mkdir warning (may already exist): $e', module: LogModule.app);
       }
 
       // 上传文件
       await client.write(backupFile, data);
-      commonPrint.log('WebDAV backup successful');
+      commonPrint.info('WebDAV backup successful', module: LogModule.app);
       return true;
     }, operationName: 'backup');
   }
@@ -61,18 +62,18 @@ class DAVClient {
   /// 从 WebDAV 恢复数据（带重试机制）
   Future<List<int>> recovery() async {
     return await _retryOperation(() async {
-      commonPrint.log('WebDAV recovery: downloading from $backupFile');
+      commonPrint.info('WebDAV recovery: downloading from $backupFile', module: LogModule.app);
 
       // 确保目录存在
       try {
         await client.mkdir(root);
       } catch (e) {
-        commonPrint.log('WebDAV mkdir warning: $e');
+        commonPrint.debug('WebDAV mkdir warning: $e', module: LogModule.app);
       }
 
       // 下载文件
       final data = await client.read(backupFile);
-      commonPrint.log('WebDAV recovery successful: ${data.length} bytes');
+      commonPrint.info('WebDAV recovery successful: ${data.length} bytes', module: LogModule.app);
       return data;
     }, operationName: 'recovery');
   }
@@ -96,15 +97,17 @@ class DAVClient {
 
         if (isLastAttempt) {
           // 最后一次尝试失败，抛出详细错误
-          commonPrint.log(
+          commonPrint.error(
             'WebDAV $operationName failed after $maxAttempts attempts: $e',
+            module: LogModule.app,
           );
           throw 'WebDAV $operationName failed: ${_formatError(e)}';
         }
 
         // 非最后一次尝试，等待后重试
-        commonPrint.log(
+        commonPrint.warning(
           'WebDAV $operationName attempt $attempt failed: $e, retrying in ${delay.inSeconds}s...',
+          module: LogModule.app,
         );
         await Future.delayed(delay);
 

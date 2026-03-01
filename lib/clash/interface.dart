@@ -109,7 +109,7 @@ abstract class ClashHandlerInterface with ClashInterface {
           return;
       }
     } catch (e) {
-      commonPrint.log('${result.id} error $e');
+      commonPrint.error('${result.id} error: $e', module: LogModule.ffi);
     }
   }
 

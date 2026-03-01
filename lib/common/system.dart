@@ -189,7 +189,7 @@ class Windows {
     calloc.free(argumentsPtr);
     calloc.free(operationPtr);
 
-    commonPrint.log('windows runas: [command masked] resultCode:$result');
+    commonPrint.debug('windows runas: [command masked] resultCode:$result', module: LogModule.app);
 
     if (result <= 32) {
       return false;
@@ -321,7 +321,7 @@ class Windows {
       await Process.run('sc', ['start', appHelperService]);
       await Future.delayed(Duration(milliseconds: 500));
     } catch (e) {
-      commonPrint.log('Failed to restart service with auth key: $e');
+      commonPrint.error('Failed to restart service with auth key: $e', module: LogModule.app);
     }
   }
 

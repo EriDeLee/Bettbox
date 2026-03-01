@@ -2,6 +2,7 @@ package com.appshub.bettbox;
 
 import android.app.Application
 import android.content.Context
+import com.appshub.bettbox.util.LogUtils
 
 class BettboxApplication : Application() {
     companion object {
@@ -14,5 +15,8 @@ class BettboxApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        
+        // Initialize logging system
+        LogUtils.init(this)
     }
 }

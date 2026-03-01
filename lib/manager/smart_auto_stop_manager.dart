@@ -119,7 +119,7 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
     }
 
     if (currentIp == null || currentIp.isEmpty) {
-      commonPrint.log('Smart Auto Stop: No legitimate IP found. Skipping.');
+      commonPrint.warning('Smart Auto Stop: No legitimate IP found. Skipping.', module: LogModule.vpn);
       return;
     }
 
@@ -134,8 +134,9 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
     // 3. Match Logic
     final shouldStop = NetworkMatcher.matchAny(currentIp, networks);
 
-    commonPrint.log(
+    commonPrint.debug(
       'SmartAutoStop: IP=$currentIp, RuleMatch=$shouldStop, Running=$isRunning, SmartStopped=$isSmartStopped',
+      module: LogModule.vpn,
     );
 
     if (shouldStop) {
@@ -143,14 +144,14 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
       if (isRunning && !isSmartStopped) {
         // Only mark as smart-stopped if we are currently running normally
         ref.read(isSmartStoppedProvider.notifier).set(true);
-        commonPrint.log('Smart Auto Stop: Stopping VPN...');
+        commonPrint.info('Smart Auto Stop: Stopping VPN...', module: LogModule.vpn);
         await _stopVpn();
       }
     } else {
       // Rule NOT matched: VPN should be RUNNING (if it was smart-stopped)
       if (!isRunning && isSmartStopped) {
         ref.read(isSmartStoppedProvider.notifier).set(false);
-        commonPrint.log('Smart Auto Stop: Restarting VPN...');
+        commonPrint.info('Smart Auto Stop: Restarting VPN...', module: LogModule.vpn);
         await _restartVpn();
       }
     }
@@ -164,7 +165,7 @@ class _SmartAutoStopManagerState extends ConsumerState<SmartAutoStopManager> {
         if (ips.isNotEmpty) return ips.first;
       }
     } catch (e) {
-      commonPrint.log('Smart Auto Stop: Native IP error: $e');
+      commonPrint.error('Smart Auto Stop: Native IP error: $e', module: LogModule.vpn);
     }
     return await _getLocalIpAddress();
   }

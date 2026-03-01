@@ -18,10 +18,10 @@ class LinkManager {
   Future<void> initAppLinksListen(
     Function(String url) installConfigCallBack,
   ) async {
-    commonPrint.log('initAppLinksListen');
+    commonPrint.debug('initAppLinksListen', module: LogModule.app);
     destroy();
     subscription = _appLinks.uriLinkStream.listen((uri) {
-      commonPrint.log('onAppLink: $uri');
+      commonPrint.debug('onAppLink: $uri', module: LogModule.app);
       if (uri.host == 'install-config') {
         final parameters = uri.queryParameters;
         final url = parameters['url'];

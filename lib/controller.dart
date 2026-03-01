@@ -543,7 +543,7 @@ class AppController {
       try {
         await updateProfile(profile);
       } catch (e) {
-        commonPrint.log(e.toString());
+        commonPrint.error('Failed to auto-update profile: $e', module: LogModule.app);
       }
     }
   }
@@ -563,15 +563,16 @@ class AppController {
       final currentGroups = _ref.read(groupsProvider);
       if (currentGroups.isEmpty) {
         // Retry initial load
-        commonPrint.log(
+        commonPrint.warning(
           'updateGroups initial load failed, scheduling retry: $e',
+          module: LogModule.proxy,
         );
         Future.delayed(const Duration(seconds: 2), () {
           updateGroupsDebounce();
         });
       } else {
         // Keep cache
-        commonPrint.log('updateGroups error, keeping existing groups: $e');
+        commonPrint.warning('updateGroups error, keeping existing groups: $e', module: LogModule.proxy);
       }
     }
   }
@@ -640,7 +641,7 @@ class AppController {
 
   Future handleClear() async {
     await preferences.clearPreferences();
-    commonPrint.log('clear preferences');
+    commonPrint.info('Preferences cleared', module: LogModule.app);
     globalState.config = Config(themeProps: defaultThemeProps);
   }
 
@@ -752,21 +753,22 @@ class AppController {
         final actualState = await WakelockPlus.enabled;
 
         if (!actualState) {
-          commonPrint.log(
+          commonPrint.warning(
             'WakeLock was released by system, attempting auto-recovery',
+            module: LogModule.app,
           );
 
           await WakelockPlus.enable();
 
           final recovered = await WakelockPlus.enabled;
           if (recovered) {
-            commonPrint.log('WakeLock auto-recovery successful');
+            commonPrint.info('WakeLock auto-recovery successful', module: LogModule.app);
           } else {
-            commonPrint.log('WakeLock auto-recovery failed');
+            commonPrint.error('WakeLock auto-recovery failed', module: LogModule.app);
           }
         }
       } catch (e) {
-        commonPrint.log('WakeLock sync error: $e');
+        commonPrint.error('WakeLock sync error: $e', module: LogModule.app);
       }
     });
   }
@@ -779,7 +781,7 @@ class AppController {
   Future<void> init() async {
     FlutterError.onError = (details) {
       if (kDebugMode) {
-        commonPrint.log(details.stack.toString());
+        commonPrint.error('Flutter error: ${details.stack}', module: LogModule.app);
       }
     };
 
@@ -791,7 +793,7 @@ class AppController {
         startWakelockAutoRecovery();
       }
     } catch (e) {
-      commonPrint.log('Failed to check wake lock status: $e');
+      commonPrint.error('Failed to check wake lock status: $e', module: LogModule.app);
     }
 
     updateTray(true);
@@ -837,16 +839,18 @@ class AppController {
 
       bool isReinstall = false;
       if (savedApkUpdateTime != 0 && savedApkUpdateTime != apkLastUpdateTime) {
-        commonPrint.log(
+        commonPrint.info(
           'Reinstall detected by time: $savedApkUpdateTime -> $apkLastUpdateTime',
+          module: LogModule.app,
         );
         isReinstall = true;
         recoveryReason = 'APK reinstall/upgrade';
       }
 
       if (lastRunVersion != null && lastRunVersion != currentVersion) {
-        commonPrint.log(
+        commonPrint.info(
           'Reinstall detected by version: $lastRunVersion -> $currentVersion',
+          module: LogModule.app,
         );
         isReinstall = true;
         recoveryReason = 'Version change';
@@ -856,8 +860,9 @@ class AppController {
       final isAbnormalExit = !globalState.isStart && isVpnRunningFlag;
       if (isAbnormalExit) {
         await prefs?.setBool('is_vpn_running', false);
-        commonPrint.log(
+        commonPrint.warning(
           'Abnormal exit detected (was running but core is dead), resetting flag',
+          module: LogModule.app,
         );
         recoveryReason = 'Abnormal exit';
       }
@@ -877,8 +882,9 @@ class AppController {
       if (!globalState.isStart &&
           lastRunVersion != null &&
           lastRunVersion != currentVersion) {
-        commonPrint.log(
+        commonPrint.info(
           'Desktop version change detected: $lastRunVersion -> $currentVersion',
+          module: LogModule.app,
         );
         needRecovery = true;
         recoveryReason = 'Version update';
@@ -889,8 +895,9 @@ class AppController {
       final isTunConflict = !globalState.isStart && wasTunRunning;
       if (isTunConflict) {
         await prefs?.setBool('is_tun_running', false);
-        commonPrint.log(
+        commonPrint.warning(
           'Desktop TUN resource conflict detected (was running but core is dead), resetting flag',
+          module: LogModule.app,
         );
         needRecovery = true;
         recoveryReason = 'TUN resource conflict';
@@ -907,38 +914,38 @@ class AppController {
       final settingsAutoRun = _ref.read(appSettingProvider).autoRun;
       final autoRun = settingsAutoRun;
 
-      commonPrint.log('Handling Recovery ($recoveryReason)...');
+      commonPrint.info('Handling Recovery ($recoveryReason)...', module: LogModule.app);
 
       // Strategy: Stop -> Wait -> Apply -> AutoStart
 
       // Recovery steps
       await globalState.handleStop();
-      
+
       // Longer wait for reinstall to let system settle
       if (recoveryReason.contains('reinstall') || recoveryReason.contains('upgrade')) {
-        commonPrint.log('Post-update wait (3s)...');
+        commonPrint.debug('Post-update wait (3s)...', module: LogModule.app);
         await Future.delayed(const Duration(seconds: 3));
       } else {
         await Future.delayed(const Duration(milliseconds: 1000));
       }
 
       if (autoRun) {
-        commonPrint.log('Waiting for system stabilization...');
+        commonPrint.debug('Waiting for system stabilization...', module: LogModule.app);
         // Additional delay for autorun
         await Future.delayed(const Duration(milliseconds: 1000));
 
-        commonPrint.log('Executing delayed AutoRun...');
+        commonPrint.debug('Executing delayed AutoRun...', module: LogModule.app);
         await updateStatus(true);
         // Apply profile AFTER VPN
         await applyProfile();
       } else {
         // core in stopped state
         await applyProfile();
-        commonPrint.log('Waiting for user action...');
+        commonPrint.debug('Waiting for user action...', module: LogModule.app);
       }
 
       addCheckIpNumDebounce();
-      commonPrint.log('Recovery sequence completed');
+      commonPrint.info('Recovery sequence completed', module: LogModule.app);
 
       // Return directly, skip default startup logic below
       return;
@@ -952,7 +959,7 @@ class AppController {
 
     // Fix Android abnormal exit connection issue
     if (system.isAndroid && status) {
-      commonPrint.log('Force applying profile...');
+      commonPrint.debug('Force applying profile...', module: LogModule.app);
       await applyProfile(silence: true);
     }
 
@@ -1289,8 +1296,9 @@ class AppController {
         .toSet();
     final currentProfileId = globalState.config.currentProfileId;
 
-    commonPrint.log(
+    commonPrint.info(
       'Starting backup: ${validProfileIds.length} profiles, current: $currentProfileId',
+      module: LogModule.app,
     );
 
     return Isolate.run<List<int>>(() async {
@@ -1395,17 +1403,17 @@ class AppController {
     RecoveryOption recoveryOption,
   ) async {
     try {
-      commonPrint.log('Starting recovery from bytes: ${data.length} bytes');
+      commonPrint.info('Starting recovery from bytes: ${data.length} bytes', module: LogModule.app);
 
       final archive = await Isolate.run<Archive>(() {
         final zipDecoder = ZipDecoder();
         return zipDecoder.decodeBytes(data);
       });
 
-      commonPrint.log('Archive decoded: ${archive.files.length} files');
+      commonPrint.debug('Archive decoded: ${archive.files.length} files', module: LogModule.app);
       await _recoveryFromArchive(archive, recoveryOption);
     } catch (e) {
-      commonPrint.log('Recovery failed: $e');
+      commonPrint.error('Recovery failed: $e', module: LogModule.app);
       throw 'Backup file is corrupted or invalid: $e';
     }
   }
@@ -1416,7 +1424,7 @@ class AppController {
     RecoveryOption recoveryOption,
   ) async {
     try {
-      commonPrint.log('Starting recovery from file: $path');
+      commonPrint.info('Starting recovery from file: $path', module: LogModule.app);
 
       final archive = await Isolate.run<Archive>(() {
         final input = InputFileStream(path);
@@ -1429,10 +1437,10 @@ class AppController {
         }
       });
 
-      commonPrint.log('Archive decoded: ${archive.files.length} files');
+      commonPrint.debug('Archive decoded: ${archive.files.length} files', module: LogModule.app);
       await _recoveryFromArchive(archive, recoveryOption);
     } catch (e) {
-      commonPrint.log('Recovery failed: $e');
+      commonPrint.error('Recovery failed: $e', module: LogModule.app);
       throw 'Backup file is corrupted or invalid: $e';
     }
   }
@@ -1561,12 +1569,14 @@ class AppController {
           await tempDb.delete();
         }
 
-        commonPrint.log(
+        commonPrint.info(
           'Extracted ${profiles.length} profiles from FlClash database',
+          module: LogModule.app,
         );
       } catch (e) {
-        commonPrint.log(
+        commonPrint.warning(
           'Failed to extract from database, fallback to file names: $e',
+          module: LogModule.app,
         );
         profiles = [];
         extractedFromDatabase = false;
@@ -1675,7 +1685,7 @@ class AppController {
         }
       }
     } catch (e) {
-      commonPrint.log('Failed to extract label from YAML: $e');
+      commonPrint.warning('Failed to extract label from YAML: $e', module: LogModule.app);
     }
     return null;
   }
@@ -1908,16 +1918,16 @@ class AppController {
   Future<void> _rollbackConfig() async {
     final lastConfig = globalState.getLastSuccessfulConfig();
     if (lastConfig == null) {
-      commonPrint.log('No backup config available for rollback');
+      commonPrint.warning('No backup config available for rollback', module: LogModule.config);
       return;
     }
 
     try {
-      commonPrint.log('Rolling back to last successful config');
+      commonPrint.info('Rolling back to last successful config', module: LogModule.config);
       await clashCore.setupConfig(lastConfig);
-      commonPrint.log('Config rollback successful');
+      commonPrint.info('Config rollback successful', module: LogModule.config);
     } catch (e) {
-      commonPrint.log('Config rollback failed: $e');
+      commonPrint.error('Config rollback failed: $e', module: LogModule.config);
     }
   }
 
@@ -1935,7 +1945,7 @@ class AppController {
       final res = await futureFunction();
       return res;
     } catch (e) {
-      commonPrint.log('$e');
+      commonPrint.error('$e', module: LogModule.app);
       if (realSilence) {
         globalState.showNotifier(e.toString());
       } else {
