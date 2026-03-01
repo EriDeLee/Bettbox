@@ -1,7 +1,6 @@
 package com.appshub.bettbox.core
 
-import com.appshub.bettbox.util.LogModule
-import com.appshub.bettbox.util.LogUtils
+import android.util.Log
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URL
@@ -48,11 +47,11 @@ data object Core {
 
     fun suspended(value: Boolean) {
         try {
-            LogUtils.d(LogModule.CORE, "suspended called with value: $value")
+            Log.d("Core", "suspended called with value: $value")
             suspend(if (value) 1 else 0)
-            LogUtils.d(LogModule.CORE, "suspend JNI call completed")
+            Log.d("Core", "suspend JNI call completed")
         } catch (e: Exception) {
-            LogUtils.e(LogModule.CORE, "Error calling suspend: ${e.message}", e)
+            Log.e("Core", "Error calling suspend: ${e.message}", e)
         }
     }
 
